@@ -44,12 +44,15 @@ type FuelStop = {
   locationUrl: string;
 };
 
+type FixedPoints = {
+  departurePointUrl: string;
+  arrivalPointUrl: string;
+};
+
 type TruckRoute = {
   id: string;
   name: string;
-  departurePointUrl: string;
   departure: string;
-  arrivalPointUrl: string;
   arrivalForecast: string;
   fuelStop?: FuelStop;
   stops: RouteStop[];
@@ -59,6 +62,7 @@ type RouteStatus = "active" | "waiting" | "done";
 type FilterStatus = "all" | RouteStatus;
 
 const STORAGE_KEY = "roteiro-truck-routes-v1";
+const FIXED_POINTS_KEY = "roteiro-truck-fixed-points-v1";
 const BACKUP_VERSION = 1;
 
 type BackupMessage = {
@@ -69,9 +73,7 @@ type BackupMessage = {
 const emptyRoute = (): TruckRoute => ({
   id: "",
   name: "",
-  departurePointUrl: "",
   departure: "07:00",
-  arrivalPointUrl: "",
   arrivalForecast: "08:00",
   stops: [
     {
@@ -111,9 +113,7 @@ function isValidRoute(value: unknown): value is TruckRoute {
   return (
     typeof route.id === "string" &&
     typeof route.name === "string" &&
-    typeof route.departurePointUrl === "string" &&
     typeof route.departure === "string" &&
-    typeof route.arrivalPointUrl === "string" &&
     typeof route.arrivalForecast === "string" &&
     (route.fuelStop === undefined ||
       (typeof route.fuelStop === "object" &&
@@ -131,6 +131,8 @@ function migrateRoute(value: unknown): TruckRoute | null {
   const legacy = value as Partial<TruckRoute> & {
     destination?: unknown;
     locationUrl?: unknown;
+    departurePointUrl?: unknown;
+    arrivalPointUrl?: unknown;
   };
   if (
     typeof legacy.id !== "string" ||
@@ -145,16 +147,31 @@ function migrateRoute(value: unknown): TruckRoute | null {
   return {
     id: legacy.id,
     name: legacy.name,
-    departurePointUrl: "",
     departure: legacy.departure,
-    arrivalPointUrl:
-      typeof legacy.locationUrl === "string"
-        ? legacy.locationUrl
-        : typeof legacy.destination === "string" && /^https?:\/\//.test(legacy.destination)
-          ? legacy.destination
-          : "",
-    arrivalForecast: legacy.departure,
+    arrivalForecast:
+      typeof legacy.arrivalForecast === "string"
+        ? legacy.arrivalForecast
+        : legacy.departure,
+    fuelStop: legacy.fuelStop,
     stops: legacy.stops
+  };
+}
+
+function isValidFixedPoints(value: unknown): value is FixedPoints {
+  if (!value || typeof value !== "object") return false;
+  const points = value as Partial<FixedPoints>;
+  return (
+    typeof points.departurePointUrl === "string" &&
+    typeof points.arrivalPointUrl === "string"
+  );
+}
+
+function getLegacyFixedPoints(value: unknown): FixedPoints {
+  if (!Array.isArray(value)) return { departurePointUrl: "", arrivalPointUrl: "" };
+  const first = value[0] as { departurePointUrl?: unknown; arrivalPointUrl?: unknown } | undefined;
+  return {
+    departurePointUrl: typeof first?.departurePointUrl === "string" ? first.departurePointUrl : "",
+    arrivalPointUrl: typeof first?.arrivalPointUrl === "string" ? first.arrivalPointUrl : ""
   };
 }
 
@@ -221,9 +238,7 @@ function makeDemoRoutes(currentMinutes: number): TruckRoute[] {
     {
       id: "demo-toyota",
       name: "Toyota Motomachi",
-      departurePointUrl: "https://www.google.com/maps/search/?api=1&query=Toyota+Parking",
       departure: time(-240),
-      arrivalPointUrl: "https://www.google.com/maps/search/?api=1&query=Toyota+Motomachi",
       arrivalForecast: time(-175),
       stops: [
         {
@@ -261,9 +276,7 @@ function makeDemoRoutes(currentMinutes: number): TruckRoute[] {
     {
       id: "demo-denso",
       name: "Denso Anjo",
-      departurePointUrl: "https://www.google.com/maps/search/?api=1&query=Anjo+Truck+Parking",
       departure: time(-70),
-      arrivalPointUrl: "https://www.google.com/maps/search/?api=1&query=Denso+Anjo",
       arrivalForecast: time(10),
       fuelStop: {
         locationUrl: "https://www.google.com/maps/search/?api=1&query=ENEOS+Anjo"
@@ -289,9 +302,7 @@ function makeDemoRoutes(currentMinutes: number): TruckRoute[] {
     {
       id: "demo-aisin",
       name: "Aisin Kariya",
-      departurePointUrl: "https://www.google.com/maps/search/?api=1&query=Kariya+Truck+Parking",
       departure: time(60),
-      arrivalPointUrl: "https://www.google.com/maps/search/?api=1&query=Aisin+Kariya",
       arrivalForecast: time(115),
       stops: [
         {
@@ -350,6 +361,11 @@ export function RouteDashboard() {
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState<TruckRoute | null>(null);
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [fixedPoints, setFixedPoints] = useState<FixedPoints>({
+    departurePointUrl: "",
+    arrivalPointUrl: ""
+  });
+  const [pointsOpen, setPointsOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
   const [backupMessage, setBackupMessage] = useState<BackupMessage | null>(null);
 
@@ -361,6 +377,7 @@ export function RouteDashboard() {
 
     updateClock();
     const stored = window.localStorage.getItem(STORAGE_KEY);
+    const storedPoints = window.localStorage.getItem(FIXED_POINTS_KEY);
     const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
     let initial: TruckRoute[];
     try {
@@ -368,8 +385,17 @@ export function RouteDashboard() {
     } catch {
       initial = makeDemoRoutes(currentMinutes);
     }
+    let initialPoints: FixedPoints;
+    try {
+      initialPoints = storedPoints && isValidFixedPoints(JSON.parse(storedPoints))
+        ? JSON.parse(storedPoints)
+        : getLegacyFixedPoints(stored ? JSON.parse(stored) : null);
+    } catch {
+      initialPoints = { departurePointUrl: "", arrivalPointUrl: "" };
+    }
     const hydrationFrame = window.requestAnimationFrame(() => {
       setRoutes(initial);
+      setFixedPoints(initialPoints);
       setSelectedId(initial[0]?.id ?? "");
       setReady(true);
     });
@@ -383,8 +409,9 @@ export function RouteDashboard() {
   useEffect(() => {
     if (ready) {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(routes));
+      window.localStorage.setItem(FIXED_POINTS_KEY, JSON.stringify(fixedPoints));
     }
-  }, [ready, routes]);
+  }, [fixedPoints, ready, routes]);
 
   const counts = useMemo(() => {
     return routes.reduce(
@@ -406,9 +433,7 @@ export function RouteDashboard() {
       .filter(
         (route) =>
           !normalized ||
-          route.name.toLocaleLowerCase("pt-BR").includes(normalized) ||
-          route.arrivalPointUrl.toLocaleLowerCase("pt-BR").includes(normalized) ||
-          route.departurePointUrl.toLocaleLowerCase("pt-BR").includes(normalized)
+          route.name.toLocaleLowerCase("pt-BR").includes(normalized)
       )
       .sort((a, b) => a.departure.localeCompare(b.departure));
   }, [filter, nowMinutes, query, routes]);
@@ -430,16 +455,12 @@ export function RouteDashboard() {
     event.preventDefault();
     if (
       !draft ||
-      !draft.name.trim() ||
-      !draft.departurePointUrl.trim() ||
-      !draft.arrivalPointUrl.trim()
+      !draft.name.trim()
     ) return;
     const cleaned = {
       ...draft,
       id: draft.id || cryptoId(),
       name: draft.name.trim(),
-      departurePointUrl: draft.departurePointUrl.trim(),
-      arrivalPointUrl: draft.arrivalPointUrl.trim(),
       fuelStop: draft.fuelStop
         ? { locationUrl: draft.fuelStop.locationUrl.trim() }
         : undefined,
@@ -473,11 +494,20 @@ export function RouteDashboard() {
     setModalOpen(true);
   }
 
+  function saveFixedPoints(points: FixedPoints) {
+    setFixedPoints({
+      departurePointUrl: points.departurePointUrl.trim(),
+      arrivalPointUrl: points.arrivalPointUrl.trim()
+    });
+    setPointsOpen(false);
+  }
+
   function exportBackup() {
     const payload = {
       app: "Roteiro",
       version: BACKUP_VERSION,
       exportedAt: new Date().toISOString(),
+      fixedPoints,
       routes
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -525,6 +555,12 @@ export function RouteDashboard() {
         stops: route.stops.map((stop) => ({ ...stop }))
       }));
       setRoutes(clonedRoutes);
+      const importedPoints =
+        parsed && typeof parsed === "object" && "fixedPoints" in parsed &&
+        isValidFixedPoints((parsed as { fixedPoints: unknown }).fixedPoints)
+          ? (parsed as { fixedPoints: FixedPoints }).fixedPoints
+          : getLegacyFixedPoints(importedRoutes);
+      setFixedPoints(importedPoints);
       setSelectedId(clonedRoutes[0]?.id ?? "");
       setFilter("all");
       setQuery("");
@@ -671,6 +707,25 @@ export function RouteDashboard() {
               </label>
             </div>
 
+            <div className="fixed-points-card">
+              <div className="fixed-points-icon"><MapPin size={18} /></div>
+              <div>
+                <strong>Pontos fixos da operação</strong>
+                <p>Partida e chegada usadas em todas as rotas.</p>
+              </div>
+              <div className="fixed-points-status">
+                <span className={fixedPoints.departurePointUrl ? "configured" : "missing"}>
+                  {fixedPoints.departurePointUrl ? "Partida configurada" : "Definir partida"}
+                </span>
+                <span className={fixedPoints.arrivalPointUrl ? "configured" : "missing"}>
+                  {fixedPoints.arrivalPointUrl ? "Chegada configurada" : "Definir chegada"}
+                </span>
+              </div>
+              <button type="button" onClick={() => setPointsOpen(true)}>
+                <Pencil size={14} /> Editar
+              </button>
+            </div>
+
             <div className="filter-tabs">
               {([
                 ["all", "Todas"],
@@ -759,6 +814,7 @@ export function RouteDashboard() {
             {selectedRoute ? (
               <RouteDetail
                 route={selectedRoute}
+                fixedPoints={fixedPoints}
                 nowMinutes={nowMinutes}
                 onEdit={() => openEditRoute(selectedRoute)}
                 onAddFuel={() => addFuelStop(selectedRoute)}
@@ -799,18 +855,28 @@ export function RouteDashboard() {
           }}
         />
       )}
+
+      {pointsOpen && (
+        <FixedPointsModal
+          points={fixedPoints}
+          onClose={() => setPointsOpen(false)}
+          onSave={saveFixedPoints}
+        />
+      )}
     </div>
   );
 }
 
 function RouteDetail({
   route,
+  fixedPoints,
   nowMinutes,
   onEdit,
   onAddFuel,
   onDelete
 }: {
   route: TruckRoute;
+  fixedPoints: FixedPoints;
   nowMinutes: number;
   onEdit: () => void;
   onAddFuel: () => void;
@@ -828,10 +894,10 @@ function RouteDetail({
             {statusCopy[status].label}
           </span>
           <h2>{route.name}</h2>
-          {route.arrivalPointUrl ? (
+          {fixedPoints.arrivalPointUrl ? (
             <a
               className="location-link"
-              href={route.arrivalPointUrl}
+              href={fixedPoints.arrivalPointUrl}
               target="_blank"
               rel="noreferrer"
             >
@@ -872,7 +938,7 @@ function RouteDetail({
           title="Ponto de partida"
           subtitle="Estacionamento de saída"
           time={route.departure}
-          href={route.departurePointUrl}
+          href={fixedPoints.departurePointUrl}
         />
         {route.fuelStop && (
           <JourneyPoint
@@ -889,7 +955,7 @@ function RouteDetail({
           title="Ponto de chegada"
           subtitle="Estacionamento de chegada"
           time={route.arrivalForecast}
-          href={route.arrivalPointUrl}
+          href={fixedPoints.arrivalPointUrl}
           actionLabel={route.fuelStop ? undefined : "Adicionar abastecimento"}
           onAction={route.fuelStop ? undefined : onAddFuel}
           isLast
@@ -1115,7 +1181,7 @@ function RouteModal({
           <div>
             <span className="eyebrow">{draft.id ? "EDITAR PLANEJAMENTO" : "NOVO PLANEJAMENTO"}</span>
             <h2 id="modal-title">{draft.id ? "Editar rota" : "Criar nova rota"}</h2>
-            <p>Defina os pontos fixos e monte as etapas da rota.</p>
+            <p>Defina os horários e monte as etapas desta rota.</p>
           </div>
           <button type="button" aria-label="Fechar" onClick={onClose}>
             <X size={20} />
@@ -1128,8 +1194,8 @@ function RouteModal({
               <div className="form-section-title">
                 <span>1</span>
                 <div>
-                  <h3>Pontos da rota</h3>
-                  <p>Partida, chegada e previsão do deslocamento</p>
+                  <h3>Informações da rota</h3>
+                  <p>Horários e previsão de chegada</p>
                 </div>
               </div>
               <div className="form-grid">
@@ -1142,19 +1208,6 @@ function RouteModal({
                     placeholder="Ex.: Toyota Motomachi"
                   />
                 </label>
-                <label className="field field-wide">
-                  <span>Ponto de partida — estacionamento do caminhão</span>
-                  <div className="input-icon">
-                    <MapPin size={16} />
-                    <input
-                      type="url"
-                      required
-                      value={draft.departurePointUrl}
-                      onChange={(event) => update("departurePointUrl", event.target.value)}
-                      placeholder="Cole o link do estacionamento de partida"
-                    />
-                  </div>
-                </label>
                 <label className="field">
                   <span>Horário de partida</span>
                   <input
@@ -1163,19 +1216,6 @@ function RouteModal({
                     value={draft.departure}
                     onChange={(event) => update("departure", event.target.value)}
                   />
-                </label>
-                <label className="field field-wide">
-                  <span>Ponto de chegada — estacionamento do caminhão</span>
-                  <div className="input-icon">
-                    <MapPin size={16} />
-                    <input
-                      type="url"
-                      required
-                      value={draft.arrivalPointUrl}
-                      onChange={(event) => update("arrivalPointUrl", event.target.value)}
-                      placeholder="Cole o link do estacionamento de chegada"
-                    />
-                  </div>
                 </label>
                 <label className="field">
                   <span>Previsão de chegada</span>
@@ -1336,6 +1376,84 @@ function RouteModal({
               <Check size={18} />
               {draft.id ? "Salvar alterações" : "Criar rota"}
             </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function FixedPointsModal({
+  points,
+  onClose,
+  onSave
+}: {
+  points: FixedPoints;
+  onClose: () => void;
+  onSave: (points: FixedPoints) => void;
+}) {
+  const [draft, setDraft] = useState(points);
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!draft.departurePointUrl.trim() || !draft.arrivalPointUrl.trim()) return;
+    onSave(draft);
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="fixed-points-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="fixed-points-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="modal-header">
+          <div>
+            <span className="eyebrow">CONFIGURAÇÃO GLOBAL</span>
+            <h2 id="fixed-points-title">Pontos fixos da operação</h2>
+            <p>Estes estacionamentos serão usados em todas as suas rotas.</p>
+          </div>
+          <button type="button" aria-label="Fechar" onClick={onClose}>
+            <X size={20} />
+          </button>
+        </div>
+        <form onSubmit={submit}>
+          <div className="fixed-points-content">
+            <label className="field">
+              <span>Ponto de partida — estacionamento do caminhão</span>
+              <div className="input-icon">
+                <Truck size={16} />
+                <input
+                  type="url"
+                  required
+                  value={draft.departurePointUrl}
+                  onChange={(event) => setDraft((current) => ({ ...current, departurePointUrl: event.target.value }))}
+                  placeholder="Cole o link do Google Maps da partida"
+                />
+              </div>
+            </label>
+            <label className="field">
+              <span>Ponto de chegada — estacionamento do caminhão</span>
+              <div className="input-icon">
+                <MapPin size={16} />
+                <input
+                  type="url"
+                  required
+                  value={draft.arrivalPointUrl}
+                  onChange={(event) => setDraft((current) => ({ ...current, arrivalPointUrl: event.target.value }))}
+                  placeholder="Cole o link do Google Maps da chegada"
+                />
+              </div>
+            </label>
+            <p className="fixed-points-note">
+              Alterar estes links atualiza a partida e a chegada de todas as rotas, sem mudar seus horários ou etapas.
+            </p>
+          </div>
+          <div className="modal-footer">
+            <button className="secondary-button" type="button" onClick={onClose}>Cancelar</button>
+            <button className="primary-button" type="submit"><Check size={18} /> Salvar pontos fixos</button>
           </div>
         </form>
       </section>
