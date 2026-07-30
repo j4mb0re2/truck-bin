@@ -59,7 +59,7 @@ type TruckRoute = {
 };
 
 type RouteStatus = "active" | "waiting" | "done";
-type FilterStatus = "all" | RouteStatus;
+type FilterStatus = "all" | Exclude<RouteStatus, "done">;
 
 const STORAGE_KEY = "roteiro-truck-routes-v1";
 const FIXED_POINTS_KEY = "roteiro-truck-fixed-points-v1";
@@ -390,7 +390,11 @@ export function RouteDashboard() {
     const hydrationFrame = window.requestAnimationFrame(() => {
       setRoutes(initial);
       setFixedPoints(initialPoints);
-      setSelectedId(initial[0]?.id ?? "");
+      setSelectedId(
+        initial.find((route) => getStatus(route, currentMinutes) === "active")?.id ??
+          initial[0]?.id ??
+          ""
+      );
       setReady(true);
     });
     const timer = window.setInterval(updateClock, 60_000);
@@ -724,8 +728,7 @@ export function RouteDashboard() {
               {([
                 ["all", "Todas"],
                 ["active", "Em andamento"],
-                ["waiting", "Aguardando"],
-                ["done", "Concluídas"]
+                ["waiting", "Aguardando"]
               ] as [FilterStatus, string][]).map(([value, label]) => (
                 <button
                   type="button"
