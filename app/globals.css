@@ -800,6 +800,22 @@ button {
   font-size: 10px;
 }
 
+.location-link {
+  margin-top: 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.location-link:hover {
+  color: #1b577f;
+  text-decoration: underline;
+}
+
 .icon-actions {
   display: flex;
   gap: 6px;
@@ -836,6 +852,10 @@ button {
   grid-template-columns: repeat(3, 1fr);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
+}
+
+.detail-metrics.route-metrics-two {
+  grid-template-columns: repeat(2, 1fr);
 }
 
 .detail-metrics > div {

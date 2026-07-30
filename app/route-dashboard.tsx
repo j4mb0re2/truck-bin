@@ -2,15 +2,14 @@
 
 import {
   ArrowRight,
-  CalendarDays,
   Check,
   CheckCircle2,
-  ChevronDown,
   CircleParking,
   Clock3,
   Coffee,
   Database,
   Download,
+  ExternalLink,
   FileJson,
   LayoutDashboard,
   Map,
@@ -43,10 +42,8 @@ type RouteStop = {
 type TruckRoute = {
   id: string;
   name: string;
-  destination: string;
-  date: string;
+  locationUrl: string;
   departure: string;
-  truck: string;
   stops: RouteStop[];
 };
 
@@ -61,13 +58,11 @@ type BackupMessage = {
   text: string;
 };
 
-const emptyRoute = (date: string): TruckRoute => ({
+const emptyRoute = (): TruckRoute => ({
   id: "",
   name: "",
-  destination: "",
-  date,
+  locationUrl: "",
   departure: "07:00",
-  truck: "",
   stops: [
     {
       id: cryptoId(),
@@ -106,13 +101,46 @@ function isValidRoute(value: unknown): value is TruckRoute {
   return (
     typeof route.id === "string" &&
     typeof route.name === "string" &&
-    typeof route.destination === "string" &&
-    typeof route.date === "string" &&
+    typeof route.locationUrl === "string" &&
     typeof route.departure === "string" &&
-    typeof route.truck === "string" &&
     Array.isArray(route.stops) &&
     route.stops.every(isValidStop)
   );
+}
+
+function migrateRoute(value: unknown): TruckRoute | null {
+  if (isValidRoute(value)) return value;
+  if (!value || typeof value !== "object") return null;
+
+  const legacy = value as Partial<TruckRoute> & { destination?: unknown };
+  if (
+    typeof legacy.id !== "string" ||
+    typeof legacy.name !== "string" ||
+    typeof legacy.departure !== "string" ||
+    !Array.isArray(legacy.stops) ||
+    !legacy.stops.every(isValidStop)
+  ) {
+    return null;
+  }
+
+  return {
+    id: legacy.id,
+    name: legacy.name,
+    locationUrl:
+      typeof legacy.destination === "string" && /^https?:\/\//.test(legacy.destination)
+        ? legacy.destination
+        : "",
+    departure: legacy.departure,
+    stops: legacy.stops
+  };
+}
+
+function normalizeRoutes(value: unknown): TruckRoute[] | null {
+  if (!Array.isArray(value)) return null;
+  const routes = value.map(migrateRoute);
+  return routes.every((route): route is TruckRoute => route !== null)
+    ? routes
+    : null;
 }
 
 function localISODate(date = new Date()) {
@@ -134,30 +162,21 @@ function routeEnd(route: TruckRoute) {
   );
 }
 
-function getStatus(route: TruckRoute, today: string, nowMinutes: number): RouteStatus {
-  if (route.date < today) return "done";
-  if (route.date > today) return "waiting";
+function getStatus(route: TruckRoute, nowMinutes: number): RouteStatus {
   if (nowMinutes < toMinutes(route.departure)) return "waiting";
   if (nowMinutes >= routeEnd(route)) return "done";
   return "active";
 }
 
-function getProgress(route: TruckRoute, today: string, nowMinutes: number) {
+function getProgress(route: TruckRoute, nowMinutes: number) {
   const start = toMinutes(route.departure);
   const end = routeEnd(route);
-  if (route.date < today || nowMinutes >= end) return 100;
-  if (route.date > today || nowMinutes <= start) return 0;
+  if (nowMinutes >= end) return 100;
+  if (nowMinutes <= start) return 0;
   return Math.min(100, Math.round(((nowMinutes - start) / (end - start)) * 100));
 }
 
-function stopStatus(
-  route: TruckRoute,
-  stop: RouteStop,
-  today: string,
-  nowMinutes: number
-) {
-  if (route.date < today) return "done";
-  if (route.date > today) return "upcoming";
+function stopStatus(stop: RouteStop, nowMinutes: number) {
   if (nowMinutes >= toMinutes(stop.end)) return "done";
   if (nowMinutes >= toMinutes(stop.start)) return "current";
   return "upcoming";
@@ -170,7 +189,7 @@ function minutesToTime(minutes: number) {
   return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
 }
 
-function makeDemoRoutes(today: string, currentMinutes: number): TruckRoute[] {
+function makeDemoRoutes(currentMinutes: number): TruckRoute[] {
   const base = Math.max(5 * 60, Math.min(20 * 60, currentMinutes));
   const time = (offset: number) => minutesToTime(base + offset);
 
@@ -178,10 +197,8 @@ function makeDemoRoutes(today: string, currentMinutes: number): TruckRoute[] {
     {
       id: "demo-toyota",
       name: "Toyota Motomachi",
-      destination: "Toyota City, Aichi",
-      date: today,
+      locationUrl: "https://www.google.com/maps/search/?api=1&query=Toyota+Motomachi",
       departure: time(-240),
-      truck: "42-18",
       stops: [
         {
           id: "demo-taiki-1",
@@ -218,10 +235,8 @@ function makeDemoRoutes(today: string, currentMinutes: number): TruckRoute[] {
     {
       id: "demo-denso",
       name: "Denso Anjo",
-      destination: "Anjo, Aichi",
-      date: today,
+      locationUrl: "https://www.google.com/maps/search/?api=1&query=Denso+Anjo",
       departure: time(-70),
-      truck: "18-73",
       stops: [
         {
           id: "demo-taiki-2",
@@ -243,10 +258,8 @@ function makeDemoRoutes(today: string, currentMinutes: number): TruckRoute[] {
     {
       id: "demo-aisin",
       name: "Aisin Kariya",
-      destination: "Kariya, Aichi",
-      date: today,
+      locationUrl: "https://www.google.com/maps/search/?api=1&query=Aisin+Kariya",
       departure: time(60),
-      truck: "09-51",
       stops: [
         {
           id: "demo-stage-4",
@@ -276,25 +289,8 @@ const stopMeta: Record<
   lunch: { label: "Almoço", icon: Coffee, color: "green" }
 };
 
-function formatLongDate(date: string) {
-  return new Intl.DateTimeFormat("pt-BR", {
-    weekday: "long",
-    day: "2-digit",
-    month: "long"
-  }).format(new Date(`${date}T12:00:00`));
-}
-
-function formatShortDate(date: string) {
-  return new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "short"
-  })
-    .format(new Date(`${date}T12:00:00`))
-    .replace(".", "");
-}
-
-function getActiveLabel(route: TruckRoute, today: string, nowMinutes: number) {
-  if (getStatus(route, today, nowMinutes) === "waiting") {
+function getActiveLabel(route: TruckRoute, nowMinutes: number) {
+  if (getStatus(route, nowMinutes) === "waiting") {
     return `Saída às ${route.departure}`;
   }
   const current = route.stops.find(
@@ -306,7 +302,7 @@ function getActiveLabel(route: TruckRoute, today: string, nowMinutes: number) {
     if (current.type === "lunch") return `Almoço até ${current.end}`;
     return `No Stage ${current.stageNumber || "—"} até ${current.end}`;
   }
-  if (getStatus(route, today, nowMinutes) === "done") return "Rota finalizada";
+  if (getStatus(route, nowMinutes) === "done") return "Rota finalizada";
   const next = route.stops.find((stop) => nowMinutes < toMinutes(stop.start));
   return next ? `Próximo: ${stopMeta[next.type].label} às ${next.start}` : "Em rota";
 }
@@ -316,7 +312,6 @@ export function RouteDashboard() {
   const [selectedId, setSelectedId] = useState("");
   const [filter, setFilter] = useState<FilterStatus>("all");
   const [query, setQuery] = useState("");
-  const [today, setToday] = useState("");
   const [nowMinutes, setNowMinutes] = useState(0);
   const [ready, setReady] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -328,21 +323,17 @@ export function RouteDashboard() {
   useEffect(() => {
     const updateClock = () => {
       const now = new Date();
-      setToday(localISODate(now));
       setNowMinutes(now.getHours() * 60 + now.getMinutes());
     };
 
     updateClock();
-    const currentDate = localISODate();
     const stored = window.localStorage.getItem(STORAGE_KEY);
     const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
     let initial: TruckRoute[];
     try {
-      initial = stored
-        ? JSON.parse(stored)
-        : makeDemoRoutes(currentDate, currentMinutes);
+      initial = stored ? normalizeRoutes(JSON.parse(stored)) ?? [] : makeDemoRoutes(currentMinutes);
     } catch {
-      initial = makeDemoRoutes(currentDate, currentMinutes);
+      initial = makeDemoRoutes(currentMinutes);
     }
     const hydrationFrame = window.requestAnimationFrame(() => {
       setRoutes(initial);
@@ -365,35 +356,34 @@ export function RouteDashboard() {
   const counts = useMemo(() => {
     return routes.reduce(
       (acc, route) => {
-        acc[getStatus(route, today, nowMinutes)] += 1;
+        acc[getStatus(route, nowMinutes)] += 1;
         return acc;
       },
       { active: 0, waiting: 0, done: 0 }
     );
-  }, [routes, today, nowMinutes]);
+  }, [routes, nowMinutes]);
 
   const filteredRoutes = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase("pt-BR");
     return routes
-      .filter((route) => route.date === today)
       .filter(
         (route) =>
-          filter === "all" || getStatus(route, today, nowMinutes) === filter
+          filter === "all" || getStatus(route, nowMinutes) === filter
       )
       .filter(
         (route) =>
           !normalized ||
           route.name.toLocaleLowerCase("pt-BR").includes(normalized) ||
-          route.destination.toLocaleLowerCase("pt-BR").includes(normalized)
+          route.locationUrl.toLocaleLowerCase("pt-BR").includes(normalized)
       )
       .sort((a, b) => a.departure.localeCompare(b.departure));
-  }, [filter, nowMinutes, query, routes, today]);
+  }, [filter, nowMinutes, query, routes]);
 
   const selectedRoute =
     routes.find((route) => route.id === selectedId) ?? filteredRoutes[0];
 
   function openNewRoute() {
-    setDraft(emptyRoute(today || localISODate()));
+    setDraft(emptyRoute());
     setModalOpen(true);
   }
 
@@ -404,13 +394,12 @@ export function RouteDashboard() {
 
   function saveRoute(event: React.FormEvent) {
     event.preventDefault();
-    if (!draft || !draft.name.trim() || !draft.destination.trim()) return;
+    if (!draft || !draft.name.trim() || !draft.locationUrl.trim()) return;
     const cleaned = {
       ...draft,
       id: draft.id || cryptoId(),
       name: draft.name.trim(),
-      destination: draft.destination.trim(),
-      truck: draft.truck.trim(),
+      locationUrl: draft.locationUrl.trim(),
       stops: draft.stops
         .map((stop) => ({
           ...stop,
@@ -473,29 +462,27 @@ export function RouteDashboard() {
           ? (parsed as { routes: unknown }).routes
           : null;
 
-      if (
-        !Array.isArray(importedRoutes) ||
-        !importedRoutes.every(isValidRoute)
-      ) {
+      const safeRoutes = normalizeRoutes(importedRoutes);
+      if (!safeRoutes) {
         throw new Error("invalid-backup");
       }
 
       const confirmed = window.confirm(
-        `Importar ${importedRoutes.length} ${importedRoutes.length === 1 ? "rota" : "rotas"}? As rotas atuais deste navegador serão substituídas.`
+        `Importar ${safeRoutes.length} ${safeRoutes.length === 1 ? "rota" : "rotas"}? As rotas atuais deste navegador serão substituídas.`
       );
       if (!confirmed) return;
 
-      const safeRoutes = importedRoutes.map((route) => ({
+      const clonedRoutes = safeRoutes.map((route) => ({
         ...route,
         stops: route.stops.map((stop) => ({ ...stop }))
       }));
-      setRoutes(safeRoutes);
-      setSelectedId(safeRoutes[0]?.id ?? "");
+      setRoutes(clonedRoutes);
+      setSelectedId(clonedRoutes[0]?.id ?? "");
       setFilter("all");
       setQuery("");
       setBackupMessage({
         type: "success",
-        text: `Arquivo importado. ${safeRoutes.length} ${safeRoutes.length === 1 ? "rota foi restaurada" : "rotas foram restauradas"}.`
+        text: `Arquivo importado. ${clonedRoutes.length} ${clonedRoutes.length === 1 ? "rota foi restaurada" : "rotas foram restauradas"}.`
       });
     } catch {
       setBackupMessage({
@@ -536,15 +523,6 @@ export function RouteDashboard() {
         </nav>
 
         <div className="sidebar-spacer" />
-        <div className="today-mini">
-          <div className="today-mini-icon">
-            <CalendarDays size={18} />
-          </div>
-          <div>
-            <span>Hoje</span>
-            <strong>{today ? formatShortDate(today) : "—"}</strong>
-          </div>
-        </div>
         <button
           className="nav-item"
           type="button"
@@ -593,11 +571,6 @@ export function RouteDashboard() {
             </div>
           </div>
           <div className="header-actions">
-            <div className="date-pill">
-              <CalendarDays size={17} />
-              <span>{today ? formatLongDate(today) : "Carregando..."}</span>
-              <ChevronDown size={15} />
-            </div>
             <button className="primary-button" type="button" onClick={openNewRoute}>
               <Plus size={19} />
               Nova rota
@@ -609,8 +582,8 @@ export function RouteDashboard() {
           <article className="stat-card stat-total">
             <div className="stat-icon"><Truck size={22} /></div>
             <div>
-              <span>Rotas de hoje</span>
-              <strong>{routes.filter((route) => route.date === today).length}</strong>
+              <span>Rotas cadastradas</span>
+              <strong>{routes.length}</strong>
             </div>
             <span className="stat-note">programadas</span>
           </article>
@@ -636,7 +609,7 @@ export function RouteDashboard() {
           <div className="routes-panel panel">
             <div className="panel-heading">
               <div>
-                <h2>Rotas de hoje</h2>
+                <h2>Minhas rotas</h2>
                 <p>Selecione uma rota para ver o andamento</p>
               </div>
               <label className="search-box">
@@ -680,8 +653,8 @@ export function RouteDashboard() {
                 </>
               ) : filteredRoutes.length ? (
                 filteredRoutes.map((route) => {
-                  const status = getStatus(route, today, nowMinutes);
-                  const progress = getProgress(route, today, nowMinutes);
+                  const status = getStatus(route, nowMinutes);
+                  const progress = getProgress(route, nowMinutes);
                   const firstStage = route.stops.find((stop) => stop.type === "stage");
                   return (
                     <button
@@ -701,7 +674,7 @@ export function RouteDashboard() {
                         </span>
                         <span className="route-destination">
                           <MapPin size={14} />
-                          {route.destination}
+                          {route.locationUrl ? "Localização no Google Maps" : "Localização não informada"}
                           {firstStage?.stageNumber && (
                             <em>Stage {firstStage.stageNumber}</em>
                           )}
@@ -714,7 +687,7 @@ export function RouteDashboard() {
                         </span>
                         <span className="next-stop">
                           <Clock3 size={14} />
-                          {getActiveLabel(route, today, nowMinutes)}
+                          {getActiveLabel(route, nowMinutes)}
                         </span>
                       </span>
                       <ArrowRight className="route-arrow" size={18} />
@@ -738,7 +711,6 @@ export function RouteDashboard() {
             {selectedRoute ? (
               <RouteDetail
                 route={selectedRoute}
-                today={today}
                 nowMinutes={nowMinutes}
                 onEdit={() => openEditRoute(selectedRoute)}
                 onDelete={() => deleteRoute(selectedRoute)}
@@ -784,19 +756,17 @@ export function RouteDashboard() {
 
 function RouteDetail({
   route,
-  today,
   nowMinutes,
   onEdit,
   onDelete
 }: {
   route: TruckRoute;
-  today: string;
   nowMinutes: number;
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const status = getStatus(route, today, nowMinutes);
-  const progress = getProgress(route, today, nowMinutes);
+  const status = getStatus(route, nowMinutes);
+  const progress = getProgress(route, nowMinutes);
 
   return (
     <div className="detail-content">
@@ -807,7 +777,18 @@ function RouteDetail({
             {statusCopy[status].label}
           </span>
           <h2>{route.name}</h2>
-          <p><MapPin size={14} /> {route.destination}</p>
+          {route.locationUrl ? (
+            <a
+              className="location-link"
+              href={route.locationUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <MapPin size={14} /> Abrir no Google Maps <ExternalLink size={12} />
+            </a>
+          ) : (
+            <p><MapPin size={14} /> Localização não informada</p>
+          )}
         </div>
         <div className="icon-actions">
           <button type="button" aria-label="Editar rota" onClick={onEdit}>
@@ -819,18 +800,14 @@ function RouteDetail({
         </div>
       </div>
 
-      <div className="detail-metrics">
+      <div className="detail-metrics route-metrics-two">
         <div>
           <span><Clock3 size={15} /> Partida</span>
           <strong>{route.departure}</strong>
         </div>
         <div>
-          <span><Truck size={15} /> Caminhão</span>
-          <strong>{route.truck || "—"}</strong>
-        </div>
-        <div>
-          <span><CalendarDays size={15} /> Data</span>
-          <strong>{formatShortDate(route.date)}</strong>
+          <span><Clock3 size={15} /> Fim previsto</span>
+          <strong>{minutesToTime(routeEnd(route))}</strong>
         </div>
       </div>
 
@@ -858,7 +835,7 @@ function RouteDetail({
           time={route.departure}
           endTime=""
           state={
-            route.date < today || nowMinutes >= toMinutes(route.departure)
+            nowMinutes >= toMinutes(route.departure)
               ? "done"
               : "upcoming"
           }
@@ -879,7 +856,7 @@ function RouteDetail({
               subtitle={stop.label}
               time={stop.start}
               endTime={stop.end}
-              state={stopStatus(route, stop, today, nowMinutes)}
+              state={stopStatus(stop, nowMinutes)}
               isLast={index === route.stops.length - 1}
             />
           );
@@ -998,7 +975,7 @@ function RouteModal({
           <div>
             <span className="eyebrow">{draft.id ? "EDITAR PLANEJAMENTO" : "NOVO PLANEJAMENTO"}</span>
             <h2 id="modal-title">{draft.id ? "Editar rota" : "Criar nova rota"}</h2>
-            <p>Preencha o destino e monte as etapas do dia.</p>
+            <p>Cole a localização do Google Maps e monte as etapas da rota.</p>
           </div>
           <button type="button" aria-label="Fechar" onClick={onClose}>
             <X size={20} />
@@ -1026,41 +1003,25 @@ function RouteModal({
                   />
                 </label>
                 <label className="field field-wide">
-                  <span>Destino</span>
+                  <span>Link da localização no Google Maps</span>
                   <div className="input-icon">
                     <MapPin size={16} />
                     <input
+                      type="url"
                       required
-                      value={draft.destination}
-                      onChange={(event) => update("destination", event.target.value)}
-                      placeholder="Cidade ou endereço da fábrica"
+                      value={draft.locationUrl}
+                      onChange={(event) => update("locationUrl", event.target.value)}
+                      placeholder="Cole o link compartilhado do Google Maps"
                     />
                   </div>
                 </label>
-                <label className="field">
-                  <span>Data</span>
-                  <input
-                    type="date"
-                    required
-                    value={draft.date}
-                    onChange={(event) => update("date", event.target.value)}
-                  />
-                </label>
-                <label className="field">
+                <label className="field field-wide">
                   <span>Horário de partida</span>
                   <input
                     type="time"
                     required
                     value={draft.departure}
                     onChange={(event) => update("departure", event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>Nº do caminhão <em>opcional</em></span>
-                  <input
-                    value={draft.truck}
-                    onChange={(event) => update("truck", event.target.value)}
-                    placeholder="Ex.: 42-18"
                   />
                 </label>
               </div>
