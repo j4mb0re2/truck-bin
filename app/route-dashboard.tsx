@@ -9,6 +9,9 @@ import {
   CircleParking,
   Clock3,
   Coffee,
+  Database,
+  Download,
+  FileJson,
   LayoutDashboard,
   Map,
   MapPin,
@@ -18,9 +21,10 @@ import {
   Plus,
   Route as RouteIcon,
   Search,
-  Settings,
+  ShieldCheck,
   Trash2,
   Truck,
+  Upload,
   X
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -50,6 +54,12 @@ type RouteStatus = "active" | "waiting" | "done";
 type FilterStatus = "all" | RouteStatus;
 
 const STORAGE_KEY = "roteiro-truck-routes-v1";
+const BACKUP_VERSION = 1;
+
+type BackupMessage = {
+  type: "success" | "error";
+  text: string;
+};
 
 const emptyRoute = (date: string): TruckRoute => ({
   id: "",
@@ -75,6 +85,34 @@ function cryptoId() {
     return crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function isValidStop(value: unknown): value is RouteStop {
+  if (!value || typeof value !== "object") return false;
+  const stop = value as Partial<RouteStop>;
+  return (
+    typeof stop.id === "string" &&
+    (stop.type === "stage" || stop.type === "taiki" || stop.type === "lunch") &&
+    typeof stop.label === "string" &&
+    typeof stop.start === "string" &&
+    typeof stop.end === "string" &&
+    (stop.stageNumber === undefined || typeof stop.stageNumber === "string")
+  );
+}
+
+function isValidRoute(value: unknown): value is TruckRoute {
+  if (!value || typeof value !== "object") return false;
+  const route = value as Partial<TruckRoute>;
+  return (
+    typeof route.id === "string" &&
+    typeof route.name === "string" &&
+    typeof route.destination === "string" &&
+    typeof route.date === "string" &&
+    typeof route.departure === "string" &&
+    typeof route.truck === "string" &&
+    Array.isArray(route.stops) &&
+    route.stops.every(isValidStop)
+  );
 }
 
 function localISODate(date = new Date()) {
@@ -284,6 +322,8 @@ export function RouteDashboard() {
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState<TruckRoute | null>(null);
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [backupOpen, setBackupOpen] = useState(false);
+  const [backupMessage, setBackupMessage] = useState<BackupMessage | null>(null);
 
   useEffect(() => {
     const updateClock = () => {
@@ -396,6 +436,75 @@ export function RouteDashboard() {
     setSelectedId("");
   }
 
+  function exportBackup() {
+    const payload = {
+      app: "Roteiro",
+      version: BACKUP_VERSION,
+      exportedAt: new Date().toISOString(),
+      routes
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json"
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `roteiro-backup-${localISODate()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setBackupMessage({
+      type: "success",
+      text: `${routes.length} ${routes.length === 1 ? "rota exportada" : "rotas exportadas"} com sucesso.`
+    });
+  }
+
+  async function importBackup(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      const importedRoutes = Array.isArray(parsed)
+        ? parsed
+        : parsed && typeof parsed === "object" && "routes" in parsed
+          ? (parsed as { routes: unknown }).routes
+          : null;
+
+      if (
+        !Array.isArray(importedRoutes) ||
+        !importedRoutes.every(isValidRoute)
+      ) {
+        throw new Error("invalid-backup");
+      }
+
+      const confirmed = window.confirm(
+        `Importar ${importedRoutes.length} ${importedRoutes.length === 1 ? "rota" : "rotas"}? As rotas atuais deste navegador serão substituídas.`
+      );
+      if (!confirmed) return;
+
+      const safeRoutes = importedRoutes.map((route) => ({
+        ...route,
+        stops: route.stops.map((stop) => ({ ...stop }))
+      }));
+      setRoutes(safeRoutes);
+      setSelectedId(safeRoutes[0]?.id ?? "");
+      setFilter("all");
+      setQuery("");
+      setBackupMessage({
+        type: "success",
+        text: `Arquivo importado. ${safeRoutes.length} ${safeRoutes.length === 1 ? "rota foi restaurada" : "rotas foram restauradas"}.`
+      });
+    } catch {
+      setBackupMessage({
+        type: "error",
+        text: "Não foi possível importar. Escolha um arquivo de backup válido do Roteiro."
+      });
+    }
+  }
+
   return (
     <div className="app-shell">
       <aside className={`sidebar ${mobileMenu ? "sidebar-open" : ""}`}>
@@ -436,9 +545,17 @@ export function RouteDashboard() {
             <strong>{today ? formatShortDate(today) : "—"}</strong>
           </div>
         </div>
-        <button className="nav-item" type="button">
-          <Settings size={19} />
-          Configurações
+        <button
+          className="nav-item"
+          type="button"
+          onClick={() => {
+            setBackupMessage(null);
+            setBackupOpen(true);
+            setMobileMenu(false);
+          }}
+        >
+          <Database size={19} />
+          Backup e dados
         </button>
         <div className="profile">
           <span className="avatar">MF</span>
@@ -646,6 +763,19 @@ export function RouteDashboard() {
             setDraft(null);
           }}
           onSave={saveRoute}
+        />
+      )}
+
+      {backupOpen && (
+        <BackupModal
+          routeCount={routes.length}
+          message={backupMessage}
+          onExport={exportBackup}
+          onImport={importBackup}
+          onClose={() => {
+            setBackupOpen(false);
+            setBackupMessage(null);
+          }}
         />
       )}
     </div>
@@ -1056,6 +1186,124 @@ function RouteModal({
             </button>
           </div>
         </form>
+      </section>
+    </div>
+  );
+}
+
+function BackupModal({
+  routeCount,
+  message,
+  onExport,
+  onImport,
+  onClose
+}: {
+  routeCount: number;
+  message: BackupMessage | null;
+  onExport: () => void;
+  onImport: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="backup-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="backup-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="modal-header">
+          <div>
+            <span className="eyebrow">BACKUP E TRANSFERÊNCIA</span>
+            <h2 id="backup-title">Leve suas rotas com você</h2>
+            <p>Salve tudo em um arquivo ou restaure em outro aparelho.</p>
+          </div>
+          <button type="button" aria-label="Fechar" onClick={onClose}>
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="backup-content">
+          <div className="backup-hero">
+            <span><FileJson size={25} /></span>
+            <div>
+              <strong>Um arquivo, toda a configuração</strong>
+              <p>
+                O backup inclui destinos, horários, stages, taikis, almoços e
+                números dos caminhões.
+              </p>
+            </div>
+          </div>
+
+          <div className="backup-options">
+            <article className="backup-option">
+              <span className="backup-option-icon export-icon">
+                <Download size={20} />
+              </span>
+              <div>
+                <h3>Exportar dados</h3>
+                <p>
+                  Baixe {routeCount} {routeCount === 1 ? "rota" : "rotas"} em um
+                  arquivo JSON para guardar ou enviar.
+                </p>
+              </div>
+              <button className="primary-button" type="button" onClick={onExport}>
+                <Download size={17} />
+                Baixar backup
+              </button>
+            </article>
+
+            <article className="backup-option">
+              <span className="backup-option-icon import-icon">
+                <Upload size={20} />
+              </span>
+              <div>
+                <h3>Importar dados</h3>
+                <p>
+                  Escolha um backup do Roteiro. Os dados atuais serão
+                  substituídos após sua confirmação.
+                </p>
+              </div>
+              <label className="secondary-button file-button" htmlFor="backup-file">
+                <Upload size={17} />
+                Escolher arquivo
+              </label>
+              <input
+                id="backup-file"
+                className="visually-hidden"
+                type="file"
+                accept=".json,application/json"
+                onChange={onImport}
+              />
+            </article>
+          </div>
+
+          {message && (
+            <div className={`backup-message ${message.type}`} role="status">
+              {message.type === "success" ? (
+                <CheckCircle2 size={17} />
+              ) : (
+                <X size={17} />
+              )}
+              {message.text}
+            </div>
+          )}
+
+          <div className="backup-security">
+            <ShieldCheck size={17} />
+            <p>
+              O arquivo contém apenas os dados das rotas. Nenhuma senha ou
+              informação de acesso é incluída.
+            </p>
+          </div>
+        </div>
+
+        <div className="modal-footer">
+          <button className="secondary-button" type="button" onClick={onClose}>
+            Fechar
+          </button>
+        </div>
       </section>
     </div>
   );
