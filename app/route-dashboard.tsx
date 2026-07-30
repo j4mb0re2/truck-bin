@@ -10,6 +10,7 @@ import {
   Database,
   Download,
   ExternalLink,
+  Fuel,
   FileJson,
   LayoutDashboard,
   Map,
@@ -39,11 +40,18 @@ type RouteStop = {
   end: string;
 };
 
+type FuelStop = {
+  locationUrl: string;
+};
+
 type TruckRoute = {
   id: string;
   name: string;
-  locationUrl: string;
+  departurePointUrl: string;
   departure: string;
+  arrivalPointUrl: string;
+  arrivalForecast: string;
+  fuelStop?: FuelStop;
   stops: RouteStop[];
 };
 
@@ -61,8 +69,10 @@ type BackupMessage = {
 const emptyRoute = (): TruckRoute => ({
   id: "",
   name: "",
-  locationUrl: "",
+  departurePointUrl: "",
   departure: "07:00",
+  arrivalPointUrl: "",
+  arrivalForecast: "08:00",
   stops: [
     {
       id: cryptoId(),
@@ -101,8 +111,14 @@ function isValidRoute(value: unknown): value is TruckRoute {
   return (
     typeof route.id === "string" &&
     typeof route.name === "string" &&
-    typeof route.locationUrl === "string" &&
+    typeof route.departurePointUrl === "string" &&
     typeof route.departure === "string" &&
+    typeof route.arrivalPointUrl === "string" &&
+    typeof route.arrivalForecast === "string" &&
+    (route.fuelStop === undefined ||
+      (typeof route.fuelStop === "object" &&
+        route.fuelStop !== null &&
+        typeof route.fuelStop.locationUrl === "string")) &&
     Array.isArray(route.stops) &&
     route.stops.every(isValidStop)
   );
@@ -112,7 +128,10 @@ function migrateRoute(value: unknown): TruckRoute | null {
   if (isValidRoute(value)) return value;
   if (!value || typeof value !== "object") return null;
 
-  const legacy = value as Partial<TruckRoute> & { destination?: unknown };
+  const legacy = value as Partial<TruckRoute> & {
+    destination?: unknown;
+    locationUrl?: unknown;
+  };
   if (
     typeof legacy.id !== "string" ||
     typeof legacy.name !== "string" ||
@@ -126,11 +145,15 @@ function migrateRoute(value: unknown): TruckRoute | null {
   return {
     id: legacy.id,
     name: legacy.name,
-    locationUrl:
-      typeof legacy.destination === "string" && /^https?:\/\//.test(legacy.destination)
-        ? legacy.destination
-        : "",
+    departurePointUrl: "",
     departure: legacy.departure,
+    arrivalPointUrl:
+      typeof legacy.locationUrl === "string"
+        ? legacy.locationUrl
+        : typeof legacy.destination === "string" && /^https?:\/\//.test(legacy.destination)
+          ? legacy.destination
+          : "",
+    arrivalForecast: legacy.departure,
     stops: legacy.stops
   };
 }
@@ -158,6 +181,7 @@ function toMinutes(time: string) {
 function routeEnd(route: TruckRoute) {
   return Math.max(
     toMinutes(route.departure),
+    toMinutes(route.arrivalForecast),
     ...route.stops.map((stop) => toMinutes(stop.end))
   );
 }
@@ -197,8 +221,10 @@ function makeDemoRoutes(currentMinutes: number): TruckRoute[] {
     {
       id: "demo-toyota",
       name: "Toyota Motomachi",
-      locationUrl: "https://www.google.com/maps/search/?api=1&query=Toyota+Motomachi",
+      departurePointUrl: "https://www.google.com/maps/search/?api=1&query=Toyota+Parking",
       departure: time(-240),
+      arrivalPointUrl: "https://www.google.com/maps/search/?api=1&query=Toyota+Motomachi",
+      arrivalForecast: time(-175),
       stops: [
         {
           id: "demo-taiki-1",
@@ -235,8 +261,13 @@ function makeDemoRoutes(currentMinutes: number): TruckRoute[] {
     {
       id: "demo-denso",
       name: "Denso Anjo",
-      locationUrl: "https://www.google.com/maps/search/?api=1&query=Denso+Anjo",
+      departurePointUrl: "https://www.google.com/maps/search/?api=1&query=Anjo+Truck+Parking",
       departure: time(-70),
+      arrivalPointUrl: "https://www.google.com/maps/search/?api=1&query=Denso+Anjo",
+      arrivalForecast: time(10),
+      fuelStop: {
+        locationUrl: "https://www.google.com/maps/search/?api=1&query=ENEOS+Anjo"
+      },
       stops: [
         {
           id: "demo-taiki-2",
@@ -258,8 +289,10 @@ function makeDemoRoutes(currentMinutes: number): TruckRoute[] {
     {
       id: "demo-aisin",
       name: "Aisin Kariya",
-      locationUrl: "https://www.google.com/maps/search/?api=1&query=Aisin+Kariya",
+      departurePointUrl: "https://www.google.com/maps/search/?api=1&query=Kariya+Truck+Parking",
       departure: time(60),
+      arrivalPointUrl: "https://www.google.com/maps/search/?api=1&query=Aisin+Kariya",
+      arrivalForecast: time(115),
       stops: [
         {
           id: "demo-stage-4",
@@ -374,7 +407,8 @@ export function RouteDashboard() {
         (route) =>
           !normalized ||
           route.name.toLocaleLowerCase("pt-BR").includes(normalized) ||
-          route.locationUrl.toLocaleLowerCase("pt-BR").includes(normalized)
+          route.arrivalPointUrl.toLocaleLowerCase("pt-BR").includes(normalized) ||
+          route.departurePointUrl.toLocaleLowerCase("pt-BR").includes(normalized)
       )
       .sort((a, b) => a.departure.localeCompare(b.departure));
   }, [filter, nowMinutes, query, routes]);
@@ -394,12 +428,21 @@ export function RouteDashboard() {
 
   function saveRoute(event: React.FormEvent) {
     event.preventDefault();
-    if (!draft || !draft.name.trim() || !draft.locationUrl.trim()) return;
+    if (
+      !draft ||
+      !draft.name.trim() ||
+      !draft.departurePointUrl.trim() ||
+      !draft.arrivalPointUrl.trim()
+    ) return;
     const cleaned = {
       ...draft,
       id: draft.id || cryptoId(),
       name: draft.name.trim(),
-      locationUrl: draft.locationUrl.trim(),
+      departurePointUrl: draft.departurePointUrl.trim(),
+      arrivalPointUrl: draft.arrivalPointUrl.trim(),
+      fuelStop: draft.fuelStop
+        ? { locationUrl: draft.fuelStop.locationUrl.trim() }
+        : undefined,
       stops: draft.stops
         .map((stop) => ({
           ...stop,
@@ -423,6 +466,11 @@ export function RouteDashboard() {
     if (!window.confirm(`Excluir a rota “${route.name}”?`)) return;
     setRoutes((current) => current.filter((item) => item.id !== route.id));
     setSelectedId("");
+  }
+
+  function addFuelStop(route: TruckRoute) {
+    setDraft({ ...route, fuelStop: { locationUrl: "" } });
+    setModalOpen(true);
   }
 
   function exportBackup() {
@@ -674,7 +722,7 @@ export function RouteDashboard() {
                         </span>
                         <span className="route-destination">
                           <MapPin size={14} />
-                          {route.locationUrl ? "Localização no Google Maps" : "Localização não informada"}
+                          Chegada prevista às {route.arrivalForecast}
                           {firstStage?.stageNumber && (
                             <em>Stage {firstStage.stageNumber}</em>
                           )}
@@ -713,6 +761,7 @@ export function RouteDashboard() {
                 route={selectedRoute}
                 nowMinutes={nowMinutes}
                 onEdit={() => openEditRoute(selectedRoute)}
+                onAddFuel={() => addFuelStop(selectedRoute)}
                 onDelete={() => deleteRoute(selectedRoute)}
               />
             ) : (
@@ -758,11 +807,13 @@ function RouteDetail({
   route,
   nowMinutes,
   onEdit,
+  onAddFuel,
   onDelete
 }: {
   route: TruckRoute;
   nowMinutes: number;
   onEdit: () => void;
+  onAddFuel: () => void;
   onDelete: () => void;
 }) {
   const status = getStatus(route, nowMinutes);
@@ -777,14 +828,14 @@ function RouteDetail({
             {statusCopy[status].label}
           </span>
           <h2>{route.name}</h2>
-          {route.locationUrl ? (
+          {route.arrivalPointUrl ? (
             <a
               className="location-link"
-              href={route.locationUrl}
+              href={route.arrivalPointUrl}
               target="_blank"
               rel="noreferrer"
             >
-              <MapPin size={14} /> Abrir no Google Maps <ExternalLink size={12} />
+              <MapPin size={14} /> Abrir chegada no Google Maps <ExternalLink size={12} />
             </a>
           ) : (
             <p><MapPin size={14} /> Localização não informada</p>
@@ -806,9 +857,43 @@ function RouteDetail({
           <strong>{route.departure}</strong>
         </div>
         <div>
-          <span><Clock3 size={15} /> Fim previsto</span>
-          <strong>{minutesToTime(routeEnd(route))}</strong>
+          <span><Clock3 size={15} /> Chegada prevista</span>
+          <strong>{route.arrivalForecast}</strong>
         </div>
+      </div>
+
+      <div className="journey-header">
+        <h3>Deslocamento</h3>
+        <span>Partida → chegada</span>
+      </div>
+      <div className="journey-points">
+        <JourneyPoint
+          icon={Truck}
+          title="Ponto de partida"
+          subtitle="Estacionamento de saída"
+          time={route.departure}
+          href={route.departurePointUrl}
+        />
+        {route.fuelStop && (
+          <JourneyPoint
+            icon={Fuel}
+            title="Abastecimento"
+            subtitle="Parada antes da chegada"
+            href={route.fuelStop.locationUrl}
+            actionLabel="Editar abastecimento"
+            onAction={onEdit}
+          />
+        )}
+        <JourneyPoint
+          icon={MapPin}
+          title="Ponto de chegada"
+          subtitle="Estacionamento de chegada"
+          time={route.arrivalForecast}
+          href={route.arrivalPointUrl}
+          actionLabel={route.fuelStop ? undefined : "Adicionar abastecimento"}
+          onAction={route.fuelStop ? undefined : onAddFuel}
+          isLast
+        />
       </div>
 
       <div className="overall-progress">
@@ -822,7 +907,7 @@ function RouteDetail({
       </div>
 
       <div className="timeline-header">
-        <h3>Linha do tempo</h3>
+        <h3>Etapas da operação</h3>
         <span>{route.stops.length + 1} etapas</span>
       </div>
 
@@ -839,7 +924,7 @@ function RouteDetail({
               ? "done"
               : "upcoming"
           }
-          isLast={route.stops.length === 0}
+          isLast={false}
         />
         {route.stops.map((stop, index) => {
           const meta = stopMeta[stop.type];
@@ -861,6 +946,57 @@ function RouteDetail({
             />
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function JourneyPoint({
+  icon: Icon,
+  title,
+  subtitle,
+  time,
+  href,
+  actionLabel,
+  onAction,
+  isLast = false
+}: {
+  icon: typeof Truck;
+  title: string;
+  subtitle: string;
+  time?: string;
+  href: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  isLast?: boolean;
+}) {
+  return (
+    <div className="journey-point">
+      <div className="journey-rail">
+        <span><Icon size={15} /></span>
+        {!isLast && <i />}
+      </div>
+      <div className="journey-copy">
+        <div>
+          <strong>{title}</strong>
+          <p>{subtitle}</p>
+          {href ? (
+            <a href={href} target="_blank" rel="noreferrer">
+              Abrir localização <ExternalLink size={11} />
+            </a>
+          ) : (
+            <em>Localização não informada</em>
+          )}
+        </div>
+        <div className="journey-side">
+          {time && <time>{time}</time>}
+          {actionLabel && onAction && (
+            <button type="button" onClick={onAction}>
+              {actionLabel === "Adicionar abastecimento" ? <Fuel size={13} /> : <Pencil size={13} />}
+              {actionLabel}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -962,6 +1098,10 @@ function RouteModal({
     );
   }
 
+  function addFuelStop() {
+    update("fuelStop", { locationUrl: "" });
+  }
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
@@ -975,7 +1115,7 @@ function RouteModal({
           <div>
             <span className="eyebrow">{draft.id ? "EDITAR PLANEJAMENTO" : "NOVO PLANEJAMENTO"}</span>
             <h2 id="modal-title">{draft.id ? "Editar rota" : "Criar nova rota"}</h2>
-            <p>Cole a localização do Google Maps e monte as etapas da rota.</p>
+            <p>Defina os pontos fixos e monte as etapas da rota.</p>
           </div>
           <button type="button" aria-label="Fechar" onClick={onClose}>
             <X size={20} />
@@ -988,8 +1128,8 @@ function RouteModal({
               <div className="form-section-title">
                 <span>1</span>
                 <div>
-                  <h3>Informações da rota</h3>
-                  <p>Dados principais do deslocamento</p>
+                  <h3>Pontos da rota</h3>
+                  <p>Partida, chegada e previsão do deslocamento</p>
                 </div>
               </div>
               <div className="form-grid">
@@ -1003,19 +1143,19 @@ function RouteModal({
                   />
                 </label>
                 <label className="field field-wide">
-                  <span>Link da localização no Google Maps</span>
+                  <span>Ponto de partida — estacionamento do caminhão</span>
                   <div className="input-icon">
                     <MapPin size={16} />
                     <input
                       type="url"
                       required
-                      value={draft.locationUrl}
-                      onChange={(event) => update("locationUrl", event.target.value)}
-                      placeholder="Cole o link compartilhado do Google Maps"
+                      value={draft.departurePointUrl}
+                      onChange={(event) => update("departurePointUrl", event.target.value)}
+                      placeholder="Cole o link do estacionamento de partida"
                     />
                   </div>
                 </label>
-                <label className="field field-wide">
+                <label className="field">
                   <span>Horário de partida</span>
                   <input
                     type="time"
@@ -1024,6 +1164,57 @@ function RouteModal({
                     onChange={(event) => update("departure", event.target.value)}
                   />
                 </label>
+                <label className="field field-wide">
+                  <span>Ponto de chegada — estacionamento do caminhão</span>
+                  <div className="input-icon">
+                    <MapPin size={16} />
+                    <input
+                      type="url"
+                      required
+                      value={draft.arrivalPointUrl}
+                      onChange={(event) => update("arrivalPointUrl", event.target.value)}
+                      placeholder="Cole o link do estacionamento de chegada"
+                    />
+                  </div>
+                </label>
+                <label className="field">
+                  <span>Previsão de chegada</span>
+                  <input
+                    type="time"
+                    required
+                    value={draft.arrivalForecast}
+                    onChange={(event) => update("arrivalForecast", event.target.value)}
+                  />
+                </label>
+                <div className="fuel-editor">
+                  {draft.fuelStop ? (
+                    <>
+                      <div className="fuel-editor-heading">
+                        <span><Fuel size={16} /></span>
+                        <strong>Local de abastecimento</strong>
+                        <button type="button" onClick={() => update("fuelStop", undefined)}>
+                          Remover
+                        </button>
+                      </div>
+                      <label className="field">
+                        <span>Link do abastecimento no Google Maps</span>
+                        <div className="input-icon">
+                          <Fuel size={16} />
+                          <input
+                            type="url"
+                            value={draft.fuelStop.locationUrl}
+                            onChange={(event) => update("fuelStop", { locationUrl: event.target.value })}
+                            placeholder="Cole o link do posto"
+                          />
+                        </div>
+                      </label>
+                    </>
+                  ) : (
+                    <button className="add-fuel-button" type="button" onClick={addFuelStop}>
+                      <Fuel size={16} /> Adicionar abastecimento antes da chegada
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 

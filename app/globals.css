@@ -887,6 +887,132 @@ button {
   border-radius: 10px;
 }
 
+.journey-header {
+  margin: 21px 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.journey-header h3 {
+  margin: 0;
+  font-size: 12px;
+}
+
+.journey-header > span {
+  color: #97a0a2;
+  font-size: 9px;
+}
+
+.journey-points {
+  padding: 13px;
+  background: #f8f9f9;
+  border: 1px solid #edf0f0;
+  border-radius: 11px;
+}
+
+.journey-point {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 9px;
+}
+
+.journey-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.journey-rail > span {
+  z-index: 1;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  color: var(--blue);
+  background: var(--blue-soft);
+  border-radius: 8px;
+}
+
+.journey-point:nth-child(2) .journey-rail > span {
+  color: var(--orange);
+  background: var(--orange-soft);
+}
+
+.journey-rail > i {
+  width: 1px;
+  flex: 1;
+  margin-top: 4px;
+  background: #dce2e2;
+}
+
+.journey-copy {
+  min-width: 0;
+  padding: 1px 0 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.journey-copy strong {
+  font-size: 10px;
+}
+
+.journey-copy p,
+.journey-copy em {
+  margin: 3px 0 0;
+  color: #8c9799;
+  font-size: 9px;
+  font-style: normal;
+}
+
+.journey-copy a {
+  margin-top: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--blue);
+  font-size: 9px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.journey-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 7px;
+}
+
+.journey-side time {
+  color: #546467;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.journey-side button,
+.add-fuel-button {
+  padding: 6px 8px;
+  border: 1px solid #efd6c8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--orange-dark);
+  background: #fffaf7;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.journey-side button:hover,
+.add-fuel-button:hover {
+  background: var(--orange-soft);
+}
+
 .overall-progress > div {
   margin-bottom: 8px;
   display: flex;
@@ -1211,6 +1337,51 @@ button {
 
 .input-icon input {
   padding-left: 34px;
+}
+
+.fuel-editor {
+  grid-column: span 3;
+  padding: 11px;
+  background: #fffaf7;
+  border: 1px solid #f0d8ca;
+  border-radius: 10px;
+}
+
+.fuel-editor-heading {
+  margin-bottom: 9px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.fuel-editor-heading > span {
+  width: 25px;
+  height: 25px;
+  display: grid;
+  place-items: center;
+  color: var(--orange);
+  background: #fff;
+  border-radius: 7px;
+}
+
+.fuel-editor-heading strong {
+  font-size: 10px;
+}
+
+.fuel-editor-heading button {
+  margin-left: auto;
+  border: 0;
+  color: #b04a3f;
+  background: transparent;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.add-fuel-button {
+  width: 100%;
+  min-height: 38px;
+  border-style: dashed;
 }
 
 .stop-list {
