@@ -1006,7 +1006,7 @@ button {
   border-radius: 8px;
 }
 
-.journey-point:nth-child(2) .journey-rail > span {
+.journey-point-fuel .journey-rail > span {
   color: var(--orange);
   background: var(--orange-soft);
 }
@@ -1047,6 +1047,52 @@ button {
   font-size: 9px;
   font-weight: 700;
   text-decoration: none;
+}
+
+.itinerary-section-heading {
+  margin: 2px 0 11px 37px;
+  padding: 9px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #fff;
+  border: 1px solid #e7ecec;
+  border-radius: 8px;
+}
+
+.itinerary-section-heading strong,
+.itinerary-section-heading span {
+  display: block;
+}
+
+.itinerary-section-heading strong {
+  font-size: 9px;
+}
+
+.itinerary-section-heading span {
+  margin-top: 3px;
+  color: #909a9c;
+  font-size: 8px;
+}
+
+.itinerary-section-heading button {
+  padding: 6px 7px;
+  border: 1px solid #dce4e4;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--blue);
+  background: #f8fbfd;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.itinerary-section-heading button:hover {
+  background: var(--blue-soft);
 }
 
 .journey-side {

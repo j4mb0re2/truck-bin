@@ -217,12 +217,6 @@ function getProgress(route: TruckRoute, nowMinutes: number) {
   return Math.min(100, Math.round(((nowMinutes - start) / (end - start)) * 100));
 }
 
-function stopStatus(stop: RouteStop, nowMinutes: number) {
-  if (nowMinutes >= toMinutes(stop.end)) return "done";
-  if (nowMinutes >= toMinutes(stop.start)) return "current";
-  return "upcoming";
-}
-
 function minutesToTime(minutes: number) {
   const safeMinutes = Math.max(0, Math.min(23 * 60 + 59, minutes));
   const hours = Math.floor(safeMinutes / 60);
@@ -884,6 +878,9 @@ function RouteDetail({
 }) {
   const status = getStatus(route, nowMinutes);
   const progress = getProgress(route, nowMinutes);
+  const orderedStops = [...route.stops].sort(
+    (first, second) => toMinutes(first.start) - toMinutes(second.start)
+  );
 
   return (
     <div className="detail-content">
@@ -929,8 +926,8 @@ function RouteDetail({
       </div>
 
       <div className="journey-header">
-        <h3>Deslocamento</h3>
-        <span>Partida → chegada</span>
+        <h3>Itinerário da rota</h3>
+        <span>Na ordem em que será feito</span>
       </div>
       <div className="journey-points">
         <JourneyPoint
@@ -940,6 +937,35 @@ function RouteDetail({
           time={route.departure}
           href={fixedPoints.departurePointUrl}
         />
+
+        <div className="itinerary-section-heading">
+          <div>
+            <strong>Entradas e configurações da rota</strong>
+            <span>Stages, taikis e almoço cadastrados</span>
+          </div>
+          <button type="button" onClick={onEdit}>
+            <Pencil size={13} /> Configurar rota
+          </button>
+        </div>
+
+        {orderedStops.map((stop) => {
+          const meta = stopMeta[stop.type];
+          return (
+            <JourneyPoint
+              key={stop.id}
+              icon={meta.icon}
+              title={
+                stop.type === "stage"
+                  ? `Entrada — Stage ${stop.stageNumber || "—"}`
+                  : meta.label
+              }
+              subtitle={stop.label || meta.label}
+              time={`${stop.start} — ${stop.end}`}
+              href=""
+            />
+          );
+        })}
+
         {route.fuelStop && (
           <JourneyPoint
             icon={Fuel}
@@ -948,6 +974,7 @@ function RouteDetail({
             href={route.fuelStop.locationUrl}
             actionLabel="Editar abastecimento"
             onAction={onEdit}
+            tone="fuel"
           />
         )}
         <JourneyPoint
@@ -972,47 +999,6 @@ function RouteDetail({
         </span>
       </div>
 
-      <div className="timeline-header">
-        <h3>Etapas da operação</h3>
-        <span>{route.stops.length + 1} etapas</span>
-      </div>
-
-      <div className="timeline">
-        <TimelineItem
-          icon={Truck}
-          color="dark"
-          title="Saída"
-          subtitle="Início da rota"
-          time={route.departure}
-          endTime=""
-          state={
-            nowMinutes >= toMinutes(route.departure)
-              ? "done"
-              : "upcoming"
-          }
-          isLast={false}
-        />
-        {route.stops.map((stop, index) => {
-          const meta = stopMeta[stop.type];
-          return (
-            <TimelineItem
-              key={stop.id}
-              icon={meta.icon}
-              color={meta.color}
-              title={
-                stop.type === "stage"
-                  ? `Stage ${stop.stageNumber || "—"}`
-                  : meta.label
-              }
-              subtitle={stop.label}
-              time={stop.start}
-              endTime={stop.end}
-              state={stopStatus(stop, nowMinutes)}
-              isLast={index === route.stops.length - 1}
-            />
-          );
-        })}
-      </div>
     </div>
   );
 }
@@ -1025,6 +1011,7 @@ function JourneyPoint({
   href,
   actionLabel,
   onAction,
+  tone,
   isLast = false
 }: {
   icon: typeof Truck;
@@ -1034,10 +1021,11 @@ function JourneyPoint({
   href: string;
   actionLabel?: string;
   onAction?: () => void;
+  tone?: "fuel";
   isLast?: boolean;
 }) {
   return (
-    <div className="journey-point">
+    <div className={`journey-point${tone ? ` journey-point-${tone}` : ""}`}>
       <div className="journey-rail">
         <span><Icon size={15} /></span>
         {!isLast && <i />}
@@ -1063,48 +1051,6 @@ function JourneyPoint({
             </button>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-function TimelineItem({
-  icon: Icon,
-  color,
-  title,
-  subtitle,
-  time,
-  endTime,
-  state,
-  isLast
-}: {
-  icon: typeof Truck;
-  color: string;
-  title: string;
-  subtitle: string;
-  time: string;
-  endTime: string;
-  state: "done" | "current" | "upcoming";
-  isLast: boolean;
-}) {
-  return (
-    <div className={`timeline-item timeline-${state}`}>
-      <div className="timeline-rail">
-        <span className={`timeline-icon icon-${color}`}>
-          {state === "done" ? <Check size={16} strokeWidth={2.8} /> : <Icon size={16} />}
-        </span>
-        {!isLast && <i />}
-      </div>
-      <div className="timeline-copy">
-        <div>
-          <strong>{title}</strong>
-          {state === "current" && <span className="now-tag">AGORA</span>}
-          <p>{subtitle}</p>
-        </div>
-        <time>
-          {time}
-          {endTime && <><span>—</span>{endTime}</>}
-        </time>
       </div>
     </div>
   );
@@ -1226,35 +1172,6 @@ function RouteModal({
                     onChange={(event) => update("arrivalForecast", event.target.value)}
                   />
                 </label>
-                <div className="fuel-editor">
-                  {draft.fuelStop ? (
-                    <>
-                      <div className="fuel-editor-heading">
-                        <span><Fuel size={16} /></span>
-                        <strong>Local de abastecimento</strong>
-                        <button type="button" onClick={() => update("fuelStop", undefined)}>
-                          Remover
-                        </button>
-                      </div>
-                      <label className="field">
-                        <span>Link do abastecimento no Google Maps</span>
-                        <div className="input-icon">
-                          <Fuel size={16} />
-                          <input
-                            type="url"
-                            value={draft.fuelStop.locationUrl}
-                            onChange={(event) => update("fuelStop", { locationUrl: event.target.value })}
-                            placeholder="Cole o link do posto"
-                          />
-                        </div>
-                      </label>
-                    </>
-                  ) : (
-                    <button className="add-fuel-button" type="button" onClick={addFuelStop}>
-                      <Fuel size={16} /> Adicionar abastecimento antes da chegada
-                    </button>
-                  )}
-                </div>
               </div>
             </div>
 
@@ -1364,6 +1281,45 @@ function RouteModal({
                 <button type="button" onClick={() => addStop("lunch")}>
                   <Coffee size={15} /> Almoço
                 </button>
+              </div>
+            </div>
+
+            <div className="form-section fuel-form-section">
+              <div className="form-section-title">
+                <span>3</span>
+                <div>
+                  <h3>Abastecimento antes da chegada</h3>
+                  <p>Opcional: esta parada será colocada logo antes do ponto de chegada.</p>
+                </div>
+              </div>
+              <div className="fuel-editor">
+                {draft.fuelStop ? (
+                  <>
+                    <div className="fuel-editor-heading">
+                      <span><Fuel size={16} /></span>
+                      <strong>Local de abastecimento</strong>
+                      <button type="button" onClick={() => update("fuelStop", undefined)}>
+                        Remover
+                      </button>
+                    </div>
+                    <label className="field">
+                      <span>Link do abastecimento no Google Maps</span>
+                      <div className="input-icon">
+                        <Fuel size={16} />
+                        <input
+                          type="url"
+                          value={draft.fuelStop.locationUrl}
+                          onChange={(event) => update("fuelStop", { locationUrl: event.target.value })}
+                          placeholder="Cole o link do posto"
+                        />
+                      </div>
+                    </label>
+                  </>
+                ) : (
+                  <button className="add-fuel-button" type="button" onClick={addFuelStop}>
+                    <Fuel size={16} /> Adicionar abastecimento antes da chegada
+                  </button>
+                )}
               </div>
             </div>
           </div>
