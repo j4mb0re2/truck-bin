@@ -611,10 +611,20 @@ button {
   gap: 5px;
 }
 
-.gpx-points-list > button {
+.gpx-point-row {
+  min-width: 0;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e0eaee;
+  border-radius: 7px;
+}
+
+.gpx-point-open {
+  width: 100%;
   min-width: 0;
   padding: 7px;
-  border: 1px solid #e0eaee;
+  border: 0;
+  border-bottom: 1px solid #eef3f5;
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) 14px;
   align-items: center;
@@ -626,12 +636,15 @@ button {
   text-align: left;
 }
 
-.gpx-points-list > button:hover {
+.gpx-point-row:hover {
   border-color: #bcd9e5;
+}
+
+.gpx-point-open:hover {
   background: #fafeff;
 }
 
-.gpx-points-list > button > span {
+.gpx-point-open > span {
   width: 18px;
   height: 18px;
   display: grid;
@@ -663,6 +676,46 @@ button {
 
 .gpx-points-list svg {
   color: #7ca8bf;
+}
+
+.gpx-point-configure {
+  width: 100%;
+  min-height: 25px;
+  padding: 4px 6px;
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--blue);
+  background: #f7fbfd;
+  cursor: pointer;
+  font-size: 7px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.gpx-point-configure:hover {
+  color: #245d86;
+  background: var(--blue-soft);
+}
+
+.gps-point-empty-steps {
+  min-height: 86px;
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #849296;
+  background: #fafcfc;
+  border: 1px dashed #dce5e6;
+  border-radius: 10px;
+  font-size: 10px;
+}
+
+.gps-point-empty-steps svg {
+  color: var(--blue);
 }
 
 .route-list {
@@ -2240,6 +2293,11 @@ button {
   background: var(--orange);
   border-color: var(--orange);
   transform: scale(1.14);
+}
+
+.gps-waypoint-marker.has-steps > span {
+  border-color: var(--green);
+  box-shadow: 0 0 0 4px rgba(54, 144, 111, 0.16), 0 3px 9px rgba(44, 109, 158, 0.18);
 }
 
 @media (max-width: 1120px) {

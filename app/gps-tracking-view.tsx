@@ -40,10 +40,12 @@ function gpsErrorMessage(error: GeolocationPositionError) {
 
 export function GpsTrackingView({
   route,
+  pointStepCounts,
   initialWaypointId,
   onBack
 }: {
   route: GpxRouteData;
+  pointStepCounts: Record<string, number>;
   initialWaypointId: string | null;
   onBack: () => void;
 }) {
@@ -227,16 +229,19 @@ export function GpsTrackingView({
       }
 
       route.waypoints.forEach((point, index) => {
+        const stepCount = pointStepCounts[point.id] ?? 0;
         leaflet
           .marker([point.latitude, point.longitude], {
             icon: leaflet.divIcon({
-              className: `gps-waypoint-marker${point.id === initialWaypointId ? " is-focused" : ""}`,
+              className: `gps-waypoint-marker${point.id === initialWaypointId ? " is-focused" : ""}${stepCount ? " has-steps" : ""}`,
               html: `<span>${index + 1}</span>`,
               iconSize: [28, 28],
               iconAnchor: [14, 14]
             })
           })
-          .bindTooltip(`${point.name} · ${formatWaypointTime(point.time, point.description)}`)
+          .bindTooltip(
+            `${point.name} · ${formatWaypointTime(point.time, point.description)}${stepCount ? ` · ${stepCount} etapa${stepCount === 1 ? "" : "s"}` : ""}`
+          )
           .addTo(map);
       });
 
@@ -264,7 +269,7 @@ export function GpsTrackingView({
       leafletRef.current = null;
       setMapReady(false);
     };
-  }, [initialWaypoint, initialWaypointId, route]);
+  }, [initialWaypoint, initialWaypointId, pointStepCounts, route]);
 
   useEffect(() => stopTracking, [stopTracking]);
 
