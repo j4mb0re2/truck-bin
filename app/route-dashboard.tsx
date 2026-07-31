@@ -12,7 +12,6 @@ import {
   ExternalLink,
   Fuel,
   FileJson,
-  LayoutDashboard,
   Map,
   MapPin,
   Menu,
@@ -22,12 +21,15 @@ import {
   Route as RouteIcon,
   Search,
   ShieldCheck,
+  Satellite,
   Trash2,
   Truck,
   Upload,
   X
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { GpsTrackingView } from "./gps-tracking-view";
+import type { GpxRouteData } from "../lib/gpx-route";
 
 type StopType = "stage" | "taiki" | "lunch";
 
@@ -59,7 +61,6 @@ type TruckRoute = {
 };
 
 type RouteStatus = "active" | "waiting" | "done";
-type FilterStatus = "all" | Exclude<RouteStatus, "done">;
 
 const STORAGE_KEY = "roteiro-truck-routes-v1";
 const FIXED_POINTS_KEY = "roteiro-truck-fixed-points-v1";
@@ -345,10 +346,14 @@ function getActiveLabel(route: TruckRoute, nowMinutes: number) {
   return next ? `Próximo: ${stopMeta[next.type].label} às ${next.start}` : "Em rota";
 }
 
-export function RouteDashboard() {
+function waypointTimeLabel(time: string, description: string) {
+  const descriptionTime = description.match(/\b(\d{2}:\d{2})(?::\d{2})?\b/)?.[1];
+  return descriptionTime ?? (time ? time.slice(11, 16) : "Ponto GPS");
+}
+
+export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
   const [routes, setRoutes] = useState<TruckRoute[]>([]);
   const [selectedId, setSelectedId] = useState("");
-  const [filter, setFilter] = useState<FilterStatus>("all");
   const [query, setQuery] = useState("");
   const [nowMinutes, setNowMinutes] = useState(0);
   const [ready, setReady] = useState(false);
@@ -362,6 +367,8 @@ export function RouteDashboard() {
   const [pointsOpen, setPointsOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
   const [backupMessage, setBackupMessage] = useState<BackupMessage | null>(null);
+  const [viewMode, setViewMode] = useState<"routes" | "gps">("routes");
+  const [gpsFocusPointId, setGpsFocusPointId] = useState<string | null>(null);
 
   useEffect(() => {
     const updateClock = () => {
@@ -426,15 +433,11 @@ export function RouteDashboard() {
     return routes
       .filter(
         (route) =>
-          filter === "all" || getStatus(route, nowMinutes) === filter
-      )
-      .filter(
-        (route) =>
           !normalized ||
           route.name.toLocaleLowerCase("pt-BR").includes(normalized)
       )
       .sort((a, b) => a.departure.localeCompare(b.departure));
-  }, [filter, nowMinutes, query, routes]);
+  }, [query, routes]);
 
   const selectedRoute =
     routes.find((route) => route.id === selectedId) ?? filteredRoutes[0];
@@ -500,6 +503,12 @@ export function RouteDashboard() {
     setPointsOpen(false);
   }
 
+  function openGps(pointId: string | null = null) {
+    setGpsFocusPointId(pointId);
+    setViewMode("gps");
+    setMobileMenu(false);
+  }
+
   function exportBackup() {
     const payload = {
       app: "Roteiro",
@@ -560,7 +569,6 @@ export function RouteDashboard() {
           : getLegacyFixedPoints(importedRoutes);
       setFixedPoints(importedPoints);
       setSelectedId(clonedRoutes[0]?.id ?? "");
-      setFilter("all");
       setQuery("");
       setBackupMessage({
         type: "success",
@@ -572,6 +580,19 @@ export function RouteDashboard() {
         text: "Não foi possível importar. Escolha um arquivo de backup válido do Roteiro."
       });
     }
+  }
+
+  if (viewMode === "gps") {
+    return (
+      <GpsTrackingView
+        route={gpxRoute}
+        initialWaypointId={gpsFocusPointId}
+        onBack={() => {
+          setViewMode("routes");
+          setGpsFocusPointId(null);
+        }}
+      />
+    );
   }
 
   return (
@@ -594,13 +615,14 @@ export function RouteDashboard() {
 
         <nav className="main-nav" aria-label="Navegação principal">
           <button className="nav-item active" type="button">
-            <LayoutDashboard size={19} />
-            Visão geral
-          </button>
-          <button className="nav-item" type="button">
             <Map size={19} />
             Minhas rotas
             <span className="nav-count">{routes.length}</span>
+          </button>
+          <button className="nav-item nav-gps" type="button" onClick={() => openGps()}>
+            <Satellite size={19} />
+            GPS
+            {gpxRoute.waypoints.length > 0 && <span className="nav-count">{gpxRoute.waypoints.length}</span>}
           </button>
         </nav>
 
@@ -653,6 +675,10 @@ export function RouteDashboard() {
             </div>
           </div>
           <div className="header-actions">
+            <button className="secondary-button gps-launch-button" type="button" onClick={() => openGps()}>
+              <Satellite size={18} />
+              GPS
+            </button>
             <button className="primary-button" type="button" onClick={openNewRoute}>
               <Plus size={19} />
               Nova rota
@@ -724,25 +750,32 @@ export function RouteDashboard() {
               </button>
             </div>
 
-            <div className="filter-tabs">
-              {([
-                ["all", "Todas"],
-                ["active", "Em andamento"],
-                ["waiting", "Aguardando"]
-              ] as [FilterStatus, string][]).map(([value, label]) => (
-                <button
-                  type="button"
-                  key={value}
-                  className={filter === value ? "active" : ""}
-                  onClick={() => setFilter(value)}
-                >
-                  {label}
-                  {value !== "all" && (
-                    <span>{counts[value]}</span>
-                  )}
-                </button>
-              ))}
-            </div>
+            {gpxRoute.waypoints.length > 0 && (
+              <div className="gpx-points-card">
+                <div className="gpx-points-heading">
+                  <div className="gpx-points-icon"><Satellite size={16} /></div>
+                  <div>
+                    <strong>Pontos da rota GPS</strong>
+                    <p>{gpxRoute.waypoints.length} marcadores do arquivo rota.gpx</p>
+                  </div>
+                  <button type="button" onClick={() => openGps()}>
+                    Ver mapa
+                  </button>
+                </div>
+                <div className="gpx-points-list">
+                  {gpxRoute.waypoints.map((point, index) => (
+                    <button type="button" key={point.id} onClick={() => openGps(point.id)}>
+                      <span>{index + 1}</span>
+                      <div>
+                        <strong>{point.name}</strong>
+                        <small>{waypointTimeLabel(point.time, point.description)}</small>
+                      </div>
+                      <MapPin size={14} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="route-list">
               {!ready ? (
