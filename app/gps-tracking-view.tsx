@@ -5,13 +5,14 @@ import {
   Crosshair,
   MapPinned,
   Navigation,
+  Plus,
   Radio,
   Route,
   Satellite,
   TriangleAlert
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { GpxRouteData } from "../lib/gpx-route";
+import type { GpxCoordinate, GpxRouteData } from "../lib/gpx-route";
 
 type GpsState = "idle" | "searching" | "tracking" | "error";
 type LivePosition = {
@@ -38,15 +39,25 @@ function gpsErrorMessage(error: GeolocationPositionError) {
   return "O GPS demorou para responder. Tente novamente em um local aberto.";
 }
 
+function tooltipText(content: string) {
+  const element = document.createElement("span");
+  element.textContent = content;
+  return element;
+}
+
 export function GpsTrackingView({
   route,
   pointStepCounts,
   initialWaypointId,
+  onAddPoint,
+  onEditPoint,
   onBack
 }: {
   route: GpxRouteData;
   pointStepCounts: Record<string, number>;
   initialWaypointId: string | null;
+  onAddPoint: (coordinate: GpxCoordinate) => void;
+  onEditPoint: (pointId: string) => void;
   onBack: () => void;
 }) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -56,10 +67,27 @@ export function GpsTrackingView({
   const truckMarkerRef = useRef<import("leaflet").Marker | null>(null);
   const accuracyCircleRef = useRef<import("leaflet").Circle | null>(null);
   const watchIdRef = useRef<number | null>(null);
+  const livePositionRef = useRef<LivePosition | null>(null);
+  const onAddPointRef = useRef(onAddPoint);
+  const onEditPointRef = useRef(onEditPoint);
+  const addPointModeRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
   const [gpsState, setGpsState] = useState<GpsState>("idle");
   const [gpsMessage, setGpsMessage] = useState("GPS desligado — ative para localizar o caminhão.");
   const [livePosition, setLivePosition] = useState<LivePosition | null>(null);
+  const [isAddingPoint, setIsAddingPoint] = useState(false);
+
+  useEffect(() => {
+    onAddPointRef.current = onAddPoint;
+  }, [onAddPoint]);
+
+  useEffect(() => {
+    onEditPointRef.current = onEditPoint;
+  }, [onEditPoint]);
+
+  useEffect(() => {
+    addPointModeRef.current = isAddingPoint;
+  }, [isAddingPoint]);
 
   const hasRoute = route.segments.some((segment) => segment.length > 1);
   const initialWaypoint = route.waypoints.find((point) => point.id === initialWaypointId);
@@ -81,46 +109,57 @@ export function GpsTrackingView({
     setGpsMessage("GPS pausado.");
   }, []);
 
-  const updateTruckMarker = useCallback((position: GeolocationPosition) => {
-    const leaflet = leafletRef.current;
-    const map = mapRef.current;
-    if (!leaflet || !map) return;
-
-    const { latitude, longitude, accuracy } = position.coords;
-    const coordinates = leaflet.latLng(latitude, longitude);
-    const truckIcon = leaflet.divIcon({
-      className: "gps-truck-marker",
-      html: "<span>🚚</span>",
-      iconSize: [42, 42],
-      iconAnchor: [21, 21]
+  const toggleAddPointMode = useCallback(() => {
+    setIsAddingPoint((currentMode) => {
+      const nextMode = !currentMode;
+      addPointModeRef.current = nextMode;
+      return nextMode;
     });
-
-    if (!truckMarkerRef.current) {
-      truckMarkerRef.current = leaflet
-        .marker(coordinates, { icon: truckIcon, zIndexOffset: 800 })
-        .bindTooltip("Meu caminhão", { permanent: false, direction: "top" })
-        .addTo(map);
-    } else {
-      truckMarkerRef.current.setLatLng(coordinates);
-    }
-
-    if (!accuracyCircleRef.current) {
-      accuracyCircleRef.current = leaflet
-        .circle(coordinates, {
-          radius: accuracy,
-          color: "#2c6d9e",
-          fillColor: "#2c6d9e",
-          fillOpacity: 0.1,
-          weight: 1
-        })
-        .addTo(map);
-    } else {
-      accuracyCircleRef.current.setLatLng(coordinates);
-      accuracyCircleRef.current.setRadius(accuracy);
-    }
-
-    map.flyTo(coordinates, Math.max(map.getZoom(), 15), { duration: 0.65 });
   }, []);
+
+  const updateTruckMarker = useCallback(
+    (position: Pick<LivePosition, "latitude" | "longitude" | "accuracy">) => {
+      const leaflet = leafletRef.current;
+      const map = mapRef.current;
+      if (!leaflet || !map) return;
+
+      const { latitude, longitude, accuracy } = position;
+      const coordinates = leaflet.latLng(latitude, longitude);
+      const truckIcon = leaflet.divIcon({
+        className: "gps-truck-marker",
+        html: "<span>🚚</span>",
+        iconSize: [42, 42],
+        iconAnchor: [21, 21]
+      });
+
+      if (!truckMarkerRef.current) {
+        truckMarkerRef.current = leaflet
+          .marker(coordinates, { icon: truckIcon, zIndexOffset: 800 })
+          .bindTooltip("Meu caminhão", { permanent: false, direction: "top" })
+          .addTo(map);
+      } else {
+        truckMarkerRef.current.setLatLng(coordinates);
+      }
+
+      if (!accuracyCircleRef.current) {
+        accuracyCircleRef.current = leaflet
+          .circle(coordinates, {
+            radius: accuracy,
+            color: "#2c6d9e",
+            fillColor: "#2c6d9e",
+            fillOpacity: 0.1,
+            weight: 1
+          })
+          .addTo(map);
+      } else {
+        accuracyCircleRef.current.setLatLng(coordinates);
+        accuracyCircleRef.current.setRadius(accuracy);
+      }
+
+      map.flyTo(coordinates, Math.max(map.getZoom(), 15), { duration: 0.65 });
+    },
+    []
+  );
 
   const startTracking = useCallback(() => {
     if (!navigator.geolocation) {
@@ -134,8 +173,7 @@ export function GpsTrackingView({
     setGpsMessage("Procurando o sinal GPS do dispositivo…");
     watchIdRef.current = navigator.geolocation.watchPosition(
       (position) => {
-        updateTruckMarker(position);
-        setLivePosition({
+        const nextLivePosition = {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
           accuracy: position.coords.accuracy,
@@ -144,7 +182,10 @@ export function GpsTrackingView({
             minute: "2-digit",
             second: "2-digit"
           })
-        });
+        };
+        livePositionRef.current = nextLivePosition;
+        updateTruckMarker(nextLivePosition);
+        setLivePosition(nextLivePosition);
         setGpsState("tracking");
         setGpsMessage("Acompanhando o caminhão ao vivo.");
       },
@@ -162,24 +203,39 @@ export function GpsTrackingView({
 
   useEffect(() => {
     let disposed = false;
+    let map: import("leaflet").Map | null = null;
+    let onMapClick: ((event: import("leaflet").LeafletMouseEvent) => void) | null = null;
 
     async function createMap() {
       const leaflet = await import("leaflet");
       if (disposed || !mapContainerRef.current) return;
 
       leafletRef.current = leaflet;
-      const map = leaflet.map(mapContainerRef.current, {
+      map = leaflet.map(mapContainerRef.current, {
         zoomControl: false,
         preferCanvas: true
       });
-      mapRef.current = map;
-      leaflet.control.zoom({ position: "bottomright" }).addTo(map);
+      const activeMap = map;
+      mapRef.current = activeMap;
+      leaflet.control.zoom({ position: "bottomright" }).addTo(activeMap);
       leaflet
         .tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
           maxZoom: 19,
           attribution: "&copy; OpenStreetMap contributors"
         })
-        .addTo(map);
+        .addTo(activeMap);
+
+      onMapClick = (event) => {
+        if (!addPointModeRef.current) return;
+
+        addPointModeRef.current = false;
+        setIsAddingPoint(false);
+        onAddPointRef.current({
+          latitude: event.latlng.lat,
+          longitude: event.latlng.lng
+        });
+      };
+      activeMap.on("click", onMapClick);
 
       const allCoordinates: [number, number][] = [];
       route.segments.forEach((segment) => {
@@ -196,7 +252,7 @@ export function GpsTrackingView({
             lineCap: "round",
             lineJoin: "round"
           })
-          .addTo(map);
+          .addTo(activeMap);
       });
 
       const firstPoint = allCoordinates.at(0);
@@ -211,8 +267,8 @@ export function GpsTrackingView({
               iconAnchor: [29, 15]
             })
           })
-          .bindTooltip("Início do arquivo GPX")
-          .addTo(map);
+          .bindTooltip(tooltipText("Início do arquivo GPX"))
+          .addTo(activeMap);
       }
       if (lastPoint) {
         leaflet
@@ -224,13 +280,13 @@ export function GpsTrackingView({
               iconAnchor: [23, 15]
             })
           })
-          .bindTooltip("Fim do arquivo GPX")
-          .addTo(map);
+          .bindTooltip(tooltipText("Fim do arquivo GPX"))
+          .addTo(activeMap);
       }
 
       route.waypoints.forEach((point, index) => {
         const stepCount = pointStepCounts[point.id] ?? 0;
-        leaflet
+        const waypointMarker = leaflet
           .marker([point.latitude, point.longitude], {
             icon: leaflet.divIcon({
               className: `gps-waypoint-marker${point.id === initialWaypointId ? " is-focused" : ""}${stepCount ? " has-steps" : ""}`,
@@ -240,36 +296,53 @@ export function GpsTrackingView({
             })
           })
           .bindTooltip(
-            `${point.name} · ${formatWaypointTime(point.time, point.description)}${stepCount ? ` · ${stepCount} etapa${stepCount === 1 ? "" : "s"}` : ""}`
+            tooltipText(
+              `${point.name} · ${formatWaypointTime(point.time, point.description)}${stepCount ? ` · ${stepCount} etapa${stepCount === 1 ? "" : "s"}` : ""}`
+            )
           )
-          .addTo(map);
+          .addTo(activeMap);
+
+        waypointMarker.on("click", (event) => {
+          leaflet.DomEvent.stopPropagation(event.originalEvent);
+          if (addPointModeRef.current) {
+            addPointModeRef.current = false;
+            setIsAddingPoint(false);
+          }
+          onEditPointRef.current(point.id);
+        });
       });
 
       if (initialWaypoint) {
-        map.setView([initialWaypoint.latitude, initialWaypoint.longitude], 14);
+        activeMap.setView([initialWaypoint.latitude, initialWaypoint.longitude], 14);
       } else if (allCoordinates.length) {
         const bounds = leaflet.latLngBounds(allCoordinates);
         routeBoundsRef.current = bounds;
-        map.fitBounds(bounds, { padding: [42, 42], maxZoom: 14 });
+        activeMap.fitBounds(bounds, { padding: [42, 42], maxZoom: 14 });
       } else {
-        map.setView([35.05, 137.12], 10);
+        activeMap.setView([35.05, 137.12], 10);
       }
 
       if (allCoordinates.length && !routeBoundsRef.current) {
         routeBoundsRef.current = leaflet.latLngBounds(allCoordinates);
       }
       setMapReady(true);
+      if (livePositionRef.current) updateTruckMarker(livePositionRef.current);
     }
 
     createMap();
     return () => {
       disposed = true;
-      mapRef.current?.remove();
-      mapRef.current = null;
-      leafletRef.current = null;
+      if (map && onMapClick) map.off("click", onMapClick);
+      map?.remove();
+      if (mapRef.current === map) {
+        mapRef.current = null;
+        truckMarkerRef.current = null;
+        accuracyCircleRef.current = null;
+      }
+      if (mapRef.current === null) leafletRef.current = null;
       setMapReady(false);
     };
-  }, [initialWaypoint, initialWaypointId, pointStepCounts, route]);
+  }, [initialWaypoint, initialWaypointId, pointStepCounts, route, updateTruckMarker]);
 
   useEffect(() => stopTracking, [stopTracking]);
 
@@ -287,6 +360,15 @@ export function GpsTrackingView({
           </div>
         </div>
         <div className="gps-header-actions">
+          <button
+            className={`secondary-button gps-add-point-button ${isAddingPoint ? "is-active" : ""}`}
+            type="button"
+            disabled={!mapReady}
+            aria-pressed={isAddingPoint}
+            onClick={toggleAddPointMode}
+          >
+            <Plus size={17} /> {isAddingPoint ? "Cancelar ponto" : "Adicionar ponto"}
+          </button>
           <button className="secondary-button gps-center-button" type="button" onClick={centerRoute}>
             <Crosshair size={17} /> Centralizar rota
           </button>
@@ -306,9 +388,18 @@ export function GpsTrackingView({
         <div className="gps-map-panel panel">
           <div className="gps-map-toolbar">
             <span className="gps-map-label"><Route size={15} /> Rota estabelecida</span>
+            {isAddingPoint && (
+              <span className="gps-add-point-hint" role="status">
+                Clique no mapa para adicionar o ponto.
+              </span>
+            )}
             <span className="gps-map-points">{route.totalTrackPoints.toLocaleString("pt-BR")} pontos GPX</span>
           </div>
-          <div className="gps-map" ref={mapContainerRef} aria-label="Mapa da rota GPS" />
+          <div
+            className={`gps-map${isAddingPoint ? " is-adding-point" : ""}`}
+            ref={mapContainerRef}
+            aria-label="Mapa da rota GPS"
+          />
           {!hasRoute && (
             <div className="gps-map-empty">
               <TriangleAlert size={20} />
@@ -363,7 +454,7 @@ export function GpsTrackingView({
               <strong>{route.renderedTrackPoints.toLocaleString("pt-BR")} pontos otimizados</strong>
             </div>
             <div>
-              <span>Marcadores do arquivo</span>
+              <span>Marcadores da rota</span>
               <strong>{route.waypoints.length} pontos em Minhas rotas</strong>
             </div>
           </div>

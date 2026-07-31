@@ -695,6 +695,34 @@ button {
   white-space: nowrap;
 }
 
+.gpx-point-actions {
+  min-height: 25px;
+  display: flex;
+  align-items: stretch;
+}
+
+.gpx-point-actions .gpx-point-configure {
+  width: auto;
+  flex: 1;
+}
+
+.gpx-point-edit {
+  width: 28px;
+  flex: 0 0 28px;
+  border: 0;
+  border-right: 1px solid #e0eaee;
+  display: grid;
+  place-items: center;
+  color: #687e86;
+  background: #fff;
+  cursor: pointer;
+}
+
+.gpx-point-edit:hover {
+  color: var(--blue);
+  background: var(--blue-soft);
+}
+
 .gpx-point-configure:hover {
   color: #245d86;
   background: var(--blue-soft);
@@ -716,6 +744,43 @@ button {
 
 .gps-point-empty-steps svg {
   color: var(--blue);
+}
+
+.gps-point-editor-modal {
+  width: min(610px, 100%);
+}
+
+.gps-point-coordinate-card {
+  margin-top: 14px;
+  padding: 11px 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #60757c;
+  background: #f7fbfd;
+  border: 1px solid #dcebf1;
+  border-radius: 10px;
+}
+
+.gps-point-coordinate-card svg {
+  flex: 0 0 auto;
+  color: var(--blue);
+}
+
+.gps-point-coordinate-card span,
+.gps-point-coordinate-card strong {
+  display: block;
+}
+
+.gps-point-coordinate-card span {
+  color: #8a989c;
+  font-size: 9px;
+}
+
+.gps-point-coordinate-card strong {
+  margin-top: 3px;
+  color: #49636d;
+  font-size: 11px;
 }
 
 .route-list {
@@ -1401,7 +1466,7 @@ button {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 1100;
   padding: 28px;
   display: grid;
   place-items: center;
@@ -2032,7 +2097,15 @@ button {
 .gps-header-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
+  flex-wrap: wrap;
+}
+
+.gps-add-point-button.is-active {
+  color: #fff;
+  background: var(--blue);
+  border-color: var(--blue);
 }
 
 .gps-track-button.is-tracking {
@@ -2099,6 +2172,23 @@ button {
 .gps-map-points {
   color: #829195;
   font-weight: 650;
+}
+
+.gps-add-point-hint {
+  padding: 7px 9px;
+  color: #245d86;
+  background: rgba(238, 247, 251, 0.96);
+  border: 1px solid #bcd9e5;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(24, 35, 38, 0.08);
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.gps-map.is-adding-point,
+.gps-map.is-adding-point .leaflet-container,
+.gps-map.is-adding-point .leaflet-interactive {
+  cursor: crosshair !important;
 }
 
 .gps-live-status {
@@ -2744,9 +2834,13 @@ button {
   }
 
   .gps-header-actions > button {
-    flex: 1;
+    flex: 1 1 calc(50% - 5px);
     padding-inline: 10px;
     font-size: 11px;
+  }
+
+  .gps-add-point-button {
+    flex-basis: 100% !important;
   }
 
   .gps-map-panel,
@@ -2757,6 +2851,12 @@ button {
 
   .gps-map-toolbar {
     align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .gps-add-point-hint {
+    order: 3;
+    flex: 1 1 100%;
   }
 
   .gps-map-points {

@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { GpsTrackingView } from "./gps-tracking-view";
-import type { GpxRouteData, GpxWaypoint } from "../lib/gpx-route";
+import type { GpxCoordinate, GpxRouteData, GpxWaypoint } from "../lib/gpx-route";
 
 type StopType = "stage" | "taiki" | "lunch";
 type StageOperation = "loading" | "unloading";
@@ -72,11 +72,30 @@ type GpsPointConfigs = Record<string, GpsPointConfig>;
 type GpsPointDraft = GpsPointConfig & {
   point: GpxWaypoint;
 };
+type GpsPointCatalog = {
+  pointOrder: string[];
+  pointNames: Record<string, string>;
+  manualPoints: GpxWaypoint[];
+};
+type ResolvedGpsPoint = GpxWaypoint & {
+  source: "gpx" | "manual";
+};
+type GpsPointEditDraft = {
+  point: ResolvedGpsPoint;
+  position: number;
+  isNew: boolean;
+};
 
 const STORAGE_KEY = "roteiro-truck-routes-v1";
 const FIXED_POINTS_KEY = "roteiro-truck-fixed-points-v1";
 const GPS_POINT_CONFIGS_KEY = "roteiro-truck-gps-point-configs-v1";
-const BACKUP_VERSION = 3;
+const GPS_POINTS_KEY = "roteiro-truck-gps-points-v1";
+const BACKUP_VERSION = 4;
+const EMPTY_GPS_POINT_CATALOG: GpsPointCatalog = {
+  pointOrder: [],
+  pointNames: {},
+  manualPoints: []
+};
 
 type BackupMessage = {
   type: "success" | "error";
@@ -106,6 +125,22 @@ function cryptoId() {
     return crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function isValidGpsWaypoint(value: unknown): value is GpxWaypoint {
+  if (!value || typeof value !== "object") return false;
+  const point = value as Partial<GpxWaypoint>;
+  return (
+    typeof point.id === "string" &&
+    point.id.length > 0 &&
+    typeof point.name === "string" &&
+    typeof point.description === "string" &&
+    typeof point.time === "string" &&
+    typeof point.latitude === "number" &&
+    Number.isFinite(point.latitude) &&
+    typeof point.longitude === "number" &&
+    Number.isFinite(point.longitude)
+  );
 }
 
 function isValidStop(value: unknown): value is RouteStop {
@@ -233,6 +268,70 @@ function normalizeGpsPointConfigs(value: unknown): GpsPointConfigs {
     }
     return configs;
   }, {});
+}
+
+function normalizeGpsPointCatalog(value: unknown): GpsPointCatalog {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return EMPTY_GPS_POINT_CATALOG;
+  }
+
+  const catalog = value as Partial<GpsPointCatalog>;
+  const seenManualIds = new Set<string>();
+  const manualPoints = Array.isArray(catalog.manualPoints)
+    ? catalog.manualPoints.filter((point) => {
+      if (!isValidGpsWaypoint(point) || seenManualIds.has(point.id)) return false;
+      seenManualIds.add(point.id);
+      return true;
+    }).map((point) => ({ ...point }))
+    : [];
+
+  const pointNames =
+    catalog.pointNames &&
+    typeof catalog.pointNames === "object" &&
+    !Array.isArray(catalog.pointNames)
+      ? Object.entries(catalog.pointNames).reduce<Record<string, string>>((names, [id, name]) => {
+        if (typeof name === "string") names[id] = name;
+        return names;
+      }, {})
+      : {};
+
+  const seenOrderIds = new Set<string>();
+  const pointOrder = Array.isArray(catalog.pointOrder)
+    ? catalog.pointOrder.filter((id): id is string => {
+      if (typeof id !== "string" || seenOrderIds.has(id)) return false;
+      seenOrderIds.add(id);
+      return true;
+    })
+    : [];
+
+  return { manualPoints, pointNames, pointOrder };
+}
+
+function resolveGpsPoints(
+  gpxPoints: GpxWaypoint[],
+  catalog: GpsPointCatalog
+): ResolvedGpsPoint[] {
+  const points = [
+    ...gpxPoints.map((point) => ({
+      ...point,
+      name: catalog.pointNames[point.id]?.trim() || point.name,
+      source: "gpx" as const
+    })),
+    ...catalog.manualPoints.map((point) => ({
+      ...point,
+      name: catalog.pointNames[point.id]?.trim() || point.name,
+      source: "manual" as const
+    }))
+  ];
+  const pointsById = new globalThis.Map<string, ResolvedGpsPoint>(
+    points.map((point) => [point.id, point])
+  );
+  const orderedPoints = catalog.pointOrder
+    .map((id) => pointsById.get(id))
+    .filter((point): point is ResolvedGpsPoint => Boolean(point));
+  const orderedIds = new Set(orderedPoints.map((point) => point.id));
+
+  return [...orderedPoints, ...points.filter((point) => !orderedIds.has(point.id))];
 }
 
 function localISODate(date = new Date()) {
@@ -440,6 +539,10 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
   const [gpsFocusPointId, setGpsFocusPointId] = useState<string | null>(null);
   const [gpsPointConfigs, setGpsPointConfigs] = useState<GpsPointConfigs>({});
   const [gpsPointDraft, setGpsPointDraft] = useState<GpsPointDraft | null>(null);
+  const [gpsPointCatalog, setGpsPointCatalog] = useState<GpsPointCatalog>(
+    EMPTY_GPS_POINT_CATALOG
+  );
+  const [gpsPointEditDraft, setGpsPointEditDraft] = useState<GpsPointEditDraft | null>(null);
 
   useEffect(() => {
     const updateClock = () => {
@@ -451,6 +554,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     const stored = window.localStorage.getItem(STORAGE_KEY);
     const storedPoints = window.localStorage.getItem(FIXED_POINTS_KEY);
     const storedGpsPointConfigs = window.localStorage.getItem(GPS_POINT_CONFIGS_KEY);
+    const storedGpsPoints = window.localStorage.getItem(GPS_POINTS_KEY);
     const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
     let initial: TruckRoute[];
     try {
@@ -474,10 +578,19 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     } catch {
       initialGpsPointConfigs = {};
     }
+    let initialGpsPointCatalog: GpsPointCatalog = EMPTY_GPS_POINT_CATALOG;
+    try {
+      initialGpsPointCatalog = storedGpsPoints
+        ? normalizeGpsPointCatalog(JSON.parse(storedGpsPoints))
+        : EMPTY_GPS_POINT_CATALOG;
+    } catch {
+      initialGpsPointCatalog = EMPTY_GPS_POINT_CATALOG;
+    }
     const hydrationFrame = window.requestAnimationFrame(() => {
       setRoutes(initial);
       setFixedPoints(initialPoints);
       setGpsPointConfigs(initialGpsPointConfigs);
+      setGpsPointCatalog(initialGpsPointCatalog);
       setSelectedId(
         initial.find((route) => getStatus(route, currentMinutes) === "active")?.id ??
           initial[0]?.id ??
@@ -497,8 +610,9 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(routes));
       window.localStorage.setItem(FIXED_POINTS_KEY, JSON.stringify(fixedPoints));
       window.localStorage.setItem(GPS_POINT_CONFIGS_KEY, JSON.stringify(gpsPointConfigs));
+      window.localStorage.setItem(GPS_POINTS_KEY, JSON.stringify(gpsPointCatalog));
     }
-  }, [fixedPoints, gpsPointConfigs, ready, routes]);
+  }, [fixedPoints, gpsPointCatalog, gpsPointConfigs, ready, routes]);
 
   const counts = useMemo(() => {
     return routes.reduce(
@@ -529,6 +643,16 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       Object.entries(gpsPointConfigs).map(([pointId, config]) => [pointId, config.stops.length])
     ),
     [gpsPointConfigs]
+  );
+
+  const gpsPoints = useMemo(
+    () => resolveGpsPoints(gpxRoute.waypoints, gpsPointCatalog),
+    [gpxRoute.waypoints, gpsPointCatalog]
+  );
+
+  const gpsRouteForView = useMemo(
+    () => ({ ...gpxRoute, waypoints: gpsPoints }),
+    [gpxRoute, gpsPoints]
   );
 
   function openNewRoute() {
@@ -634,12 +758,81 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     setGpsPointDraft(null);
   }
 
+  function openGpsPointEditor(point: ResolvedGpsPoint) {
+    const position = gpsPoints.findIndex((item) => item.id === point.id) + 1;
+    setGpsPointEditDraft({ point, position: Math.max(position, 1), isNew: false });
+  }
+
+  function openGpsPointEditorById(pointId: string) {
+    const point = gpsPoints.find((item) => item.id === pointId);
+    if (point) openGpsPointEditor(point);
+  }
+
+  function addGpsPointFromMap(coordinate: GpxCoordinate) {
+    const point: ResolvedGpsPoint = {
+      id: `gps-manual-${cryptoId()}`,
+      name: `Ponto ${gpsPoints.length + 1}`,
+      description: "Ponto adicionado manualmente no mapa",
+      time: "",
+      latitude: coordinate.latitude,
+      longitude: coordinate.longitude,
+      source: "manual"
+    };
+    setGpsPointEditDraft({ point, position: gpsPoints.length + 1, isNew: true });
+  }
+
+  function saveGpsPointEditor(draftToSave: GpsPointEditDraft, name: string, position: number) {
+    const cleanedName = name.trim();
+    if (!cleanedName) return;
+
+    const savedPoint: GpxWaypoint = {
+      id: draftToSave.point.id,
+      name: cleanedName,
+      description: draftToSave.point.description,
+      time: draftToSave.point.time,
+      latitude: draftToSave.point.latitude,
+      longitude: draftToSave.point.longitude
+    };
+
+    setGpsPointCatalog((current) => {
+      const manualPoints = draftToSave.isNew
+        ? [...current.manualPoints, savedPoint]
+        : current.manualPoints.map((point) =>
+          point.id === savedPoint.id ? savedPoint : point
+        );
+      const knownIds = [
+        ...gpxRoute.waypoints.map((point) => point.id),
+        ...manualPoints.map((point) => point.id)
+      ];
+      const knownIdSet = new Set(knownIds);
+      const orderedIds = [
+        ...current.pointOrder.filter((id) => knownIdSet.has(id)),
+        ...knownIds.filter((id) => !current.pointOrder.includes(id))
+      ];
+      const pointOrder = orderedIds.filter((id) => id !== savedPoint.id);
+      const nextPosition = Math.min(
+        Math.max(Math.round(position) || 1, 1),
+        pointOrder.length + 1
+      );
+      pointOrder.splice(nextPosition - 1, 0, savedPoint.id);
+
+      return {
+        manualPoints,
+        pointNames: { ...current.pointNames, [savedPoint.id]: cleanedName },
+        pointOrder
+      };
+    });
+    setGpsFocusPointId(savedPoint.id);
+    setGpsPointEditDraft(null);
+  }
+
   function exportBackup() {
     const payload = {
       app: "Roteiro",
       version: BACKUP_VERSION,
       exportedAt: new Date().toISOString(),
       fixedPoints,
+      gpsPointCatalog,
       gpsPointConfigs,
       routes
     };
@@ -699,6 +892,11 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           ? normalizeGpsPointConfigs((parsed as { gpsPointConfigs: unknown }).gpsPointConfigs)
           : {};
       setGpsPointConfigs(importedGpsPointConfigs);
+      const importedGpsPointCatalog =
+        parsed && typeof parsed === "object" && "gpsPointCatalog" in parsed
+          ? normalizeGpsPointCatalog((parsed as { gpsPointCatalog: unknown }).gpsPointCatalog)
+          : EMPTY_GPS_POINT_CATALOG;
+      setGpsPointCatalog(importedGpsPointCatalog);
       setSelectedId(clonedRoutes[0]?.id ?? "");
       setQuery("");
       setBackupMessage({
@@ -715,15 +913,27 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
 
   if (viewMode === "gps") {
     return (
-      <GpsTrackingView
-        route={gpxRoute}
-        pointStepCounts={gpsPointStepCounts}
-        initialWaypointId={gpsFocusPointId}
-        onBack={() => {
-          setViewMode("routes");
-          setGpsFocusPointId(null);
-        }}
-      />
+      <>
+        <GpsTrackingView
+          route={gpsRouteForView}
+          pointStepCounts={gpsPointStepCounts}
+          initialWaypointId={gpsFocusPointId}
+          onAddPoint={addGpsPointFromMap}
+          onEditPoint={openGpsPointEditorById}
+          onBack={() => {
+            setViewMode("routes");
+            setGpsFocusPointId(null);
+          }}
+        />
+        {gpsPointEditDraft && (
+          <GpsPointEditorModal
+            draft={gpsPointEditDraft}
+            pointCount={gpsPoints.length + (gpsPointEditDraft.isNew ? 1 : 0)}
+            onClose={() => setGpsPointEditDraft(null)}
+            onSave={(name, position) => saveGpsPointEditor(gpsPointEditDraft, name, position)}
+          />
+        )}
+      </>
     );
   }
 
@@ -882,20 +1092,20 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
               </button>
             </div>
 
-            {gpxRoute.waypoints.length > 0 && (
+            {gpsPoints.length > 0 && (
               <div className="gpx-points-card">
                 <div className="gpx-points-heading">
                   <div className="gpx-points-icon"><Satellite size={16} /></div>
                   <div>
                     <strong>Pontos da rota GPS</strong>
-                    <p>{gpxRoute.waypoints.length} marcadores do arquivo rota.gpx</p>
+                    <p>{gpsPoints.length} marcadores na rota GPS</p>
                   </div>
                   <button type="button" onClick={() => openGps()}>
                     Ver mapa
                   </button>
                 </div>
                 <div className="gpx-points-list">
-                  {gpxRoute.waypoints.map((point, index) => {
+                  {gpsPoints.map((point, index) => {
                     const config = gpsPointConfigs[point.id];
                     return (
                       <div className="gpx-point-row" key={point.id}>
@@ -917,18 +1127,29 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                           </div>
                           <MapPin size={14} />
                         </button>
-                        <button
-                          className="gpx-point-configure"
-                          type="button"
-                          onClick={() => openGpsPointConfig(point)}
-                        >
-                          <Pencil size={12} />
-                          {gpsPointStepCounts[point.id]
-                            ? `${gpsPointStepCounts[point.id]} ${gpsPointStepCounts[point.id] === 1 ? "etapa" : "etapas"}`
-                            : config?.startTime || config?.arrivalTime
-                              ? "Editar horários"
-                            : "Configurar etapas"}
-                        </button>
+                        <div className="gpx-point-actions">
+                          <button
+                            className="gpx-point-edit"
+                            type="button"
+                            aria-label={`Editar nome e número de ${point.name}`}
+                            title="Editar nome e número"
+                            onClick={() => openGpsPointEditor(point)}
+                          >
+                            <Pencil size={12} />
+                          </button>
+                          <button
+                            className="gpx-point-configure"
+                            type="button"
+                            onClick={() => openGpsPointConfig(point)}
+                          >
+                            <Clock3 size={12} />
+                            {gpsPointStepCounts[point.id]
+                              ? `${gpsPointStepCounts[point.id]} ${gpsPointStepCounts[point.id] === 1 ? "etapa" : "etapas"}`
+                              : config?.startTime || config?.arrivalTime
+                                ? "Editar horários"
+                                : "Configurar etapas"}
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -1059,6 +1280,15 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           initialConfig={gpsPointDraft}
           onClose={() => setGpsPointDraft(null)}
           onSave={(config) => saveGpsPointConfig(gpsPointDraft.point.id, config)}
+        />
+      )}
+
+      {gpsPointEditDraft && (
+        <GpsPointEditorModal
+          draft={gpsPointEditDraft}
+          pointCount={gpsPoints.length + (gpsPointEditDraft.isNew ? 1 : 0)}
+          onClose={() => setGpsPointEditDraft(null)}
+          onSave={(name, position) => saveGpsPointEditor(gpsPointEditDraft, name, position)}
         />
       )}
     </div>
@@ -1839,6 +2069,116 @@ function GpsPointConfigModal({
             </button>
             <button className="primary-button" type="submit">
               <Check size={18} /> Salvar etapas
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function GpsPointEditorModal({
+  draft,
+  pointCount,
+  onClose,
+  onSave
+}: {
+  draft: GpsPointEditDraft;
+  pointCount: number;
+  onClose: () => void;
+  onSave: (name: string, position: number) => void;
+}) {
+  const [name, setName] = useState(draft.point.name);
+  const [position, setPosition] = useState(String(draft.position));
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!name.trim()) return;
+    const requestedPosition = Number.parseInt(position, 10);
+    onSave(
+      name,
+      Math.min(Math.max(Number.isFinite(requestedPosition) ? requestedPosition : draft.position, 1), pointCount)
+    );
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="route-modal gps-point-editor-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="gps-point-editor-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="modal-header">
+          <div>
+            <span className="eyebrow">{draft.isNew ? "NOVO PONTO NO MAPA" : "PONTO DA ROTA GPS"}</span>
+            <h2 id="gps-point-editor-title">
+              {draft.isNew ? "Adicionar ponto" : "Editar ponto"}
+            </h2>
+            <p>
+              {draft.isNew
+                ? "Defina o nome e a posição deste novo marcador na sua lista."
+                : "Altere o nome e o número que aparecem no mapa e em Minhas rotas."}
+            </p>
+          </div>
+          <button type="button" aria-label="Fechar" onClick={onClose}>
+            <X size={20} />
+          </button>
+        </div>
+
+        <form onSubmit={submit}>
+          <div className="modal-scroll">
+            <div className="form-section">
+              <div className="form-section-title">
+                <span>1</span>
+                <div>
+                  <h3>Identificação do ponto</h3>
+                  <p>O número reorganiza todos os marcadores automaticamente.</p>
+                </div>
+              </div>
+              <div className="form-grid">
+                <label className="field field-wide">
+                  <span>Nome do ponto</span>
+                  <input
+                    required
+                    autoFocus
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder="Ex.: Shako"
+                  />
+                </label>
+                <label className="field">
+                  <span>Número na lista</span>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    max={pointCount}
+                    inputMode="numeric"
+                    value={position}
+                    onChange={(event) => setPosition(event.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="gps-point-coordinate-card">
+                <MapPin size={17} />
+                <div>
+                  <span>Localização selecionada</span>
+                  <strong>
+                    {draft.point.latitude.toFixed(5)}, {draft.point.longitude.toFixed(5)}
+                  </strong>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="modal-footer">
+            <button className="secondary-button" type="button" onClick={onClose}>
+              Cancelar
+            </button>
+            <button className="primary-button" type="submit">
+              <Check size={18} /> {draft.isNew ? "Adicionar ponto" : "Salvar ponto"}
             </button>
           </div>
         </form>
