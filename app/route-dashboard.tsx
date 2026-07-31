@@ -32,12 +32,14 @@ import { GpsTrackingView } from "./gps-tracking-view";
 import type { GpxRouteData, GpxWaypoint } from "../lib/gpx-route";
 
 type StopType = "stage" | "taiki" | "lunch";
+type StageOperation = "loading" | "unloading";
 
 type RouteStop = {
   id: string;
   type: StopType;
   label: string;
   stageNumber?: string;
+  stageOperation?: StageOperation;
   start: string;
   end: string;
 };
@@ -61,16 +63,20 @@ type TruckRoute = {
 };
 
 type RouteStatus = "active" | "waiting" | "done";
-type GpsPointConfigs = Record<string, RouteStop[]>;
-type GpsPointDraft = {
-  point: GpxWaypoint;
+type GpsPointConfig = {
+  startTime: string;
+  arrivalTime: string;
   stops: RouteStop[];
+};
+type GpsPointConfigs = Record<string, GpsPointConfig>;
+type GpsPointDraft = GpsPointConfig & {
+  point: GpxWaypoint;
 };
 
 const STORAGE_KEY = "roteiro-truck-routes-v1";
 const FIXED_POINTS_KEY = "roteiro-truck-fixed-points-v1";
 const GPS_POINT_CONFIGS_KEY = "roteiro-truck-gps-point-configs-v1";
-const BACKUP_VERSION = 2;
+const BACKUP_VERSION = 3;
 
 type BackupMessage = {
   type: "success" | "error";
@@ -88,6 +94,7 @@ const emptyRoute = (): TruckRoute => ({
       type: "stage",
       label: "Descarga",
       stageNumber: "",
+      stageOperation: "unloading",
       start: "08:00",
       end: "09:00"
     }
@@ -110,7 +117,10 @@ function isValidStop(value: unknown): value is RouteStop {
     typeof stop.label === "string" &&
     typeof stop.start === "string" &&
     typeof stop.end === "string" &&
-    (stop.stageNumber === undefined || typeof stop.stageNumber === "string")
+    (stop.stageNumber === undefined || typeof stop.stageNumber === "string") &&
+    (stop.stageOperation === undefined ||
+      stop.stageOperation === "loading" ||
+      stop.stageOperation === "unloading")
   );
 }
 
@@ -193,9 +203,31 @@ function normalizeRoutes(value: unknown): TruckRoute[] | null {
 function normalizeGpsPointConfigs(value: unknown): GpsPointConfigs {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
 
-  return Object.entries(value).reduce<GpsPointConfigs>((configs, [pointId, stops]) => {
-    if (Array.isArray(stops) && stops.every(isValidStop)) {
-      configs[pointId] = stops.map((stop) => ({ ...stop }));
+  return Object.entries(value).reduce<GpsPointConfigs>((configs, [pointId, config]) => {
+    if (Array.isArray(config) && config.every(isValidStop)) {
+      configs[pointId] = {
+        startTime: "",
+        arrivalTime: "",
+        stops: config.map((stop) => ({ ...stop }))
+      };
+      return configs;
+    }
+
+    if (
+      config &&
+      typeof config === "object" &&
+      !Array.isArray(config) &&
+      typeof (config as Partial<GpsPointConfig>).startTime === "string" &&
+      typeof (config as Partial<GpsPointConfig>).arrivalTime === "string" &&
+      Array.isArray((config as Partial<GpsPointConfig>).stops) &&
+      (config as Partial<GpsPointConfig>).stops?.every(isValidStop)
+    ) {
+      const saved = config as GpsPointConfig;
+      configs[pointId] = {
+        startTime: saved.startTime,
+        arrivalTime: saved.arrivalTime,
+        stops: saved.stops.map((stop) => ({ ...stop }))
+      };
     }
     return configs;
   }, {});
@@ -265,6 +297,7 @@ function makeDemoRoutes(currentMinutes: number): TruckRoute[] {
           type: "stage",
           label: "Entrega de peças",
           stageNumber: "05",
+          stageOperation: "unloading",
           start: time(-170),
           end: time(-120)
         },
@@ -280,6 +313,7 @@ function makeDemoRoutes(currentMinutes: number): TruckRoute[] {
           type: "stage",
           label: "Coleta de retorno",
           stageNumber: "12",
+          stageOperation: "loading",
           start: time(-80),
           end: time(-45)
         }
@@ -306,6 +340,7 @@ function makeDemoRoutes(currentMinutes: number): TruckRoute[] {
           type: "stage",
           label: "Entrega",
           stageNumber: "03",
+          stageOperation: "unloading",
           start: time(15),
           end: time(90)
         }
@@ -322,6 +357,7 @@ function makeDemoRoutes(currentMinutes: number): TruckRoute[] {
           type: "stage",
           label: "Carga programada",
           stageNumber: "08",
+          stageOperation: "loading",
           start: time(115),
           end: time(190)
         }
@@ -334,6 +370,11 @@ const statusCopy: Record<RouteStatus, { label: string; className: string }> = {
   active: { label: "Em andamento", className: "status-active" },
   waiting: { label: "Aguardando", className: "status-waiting" },
   done: { label: "Concluída", className: "status-done" }
+};
+
+const stageOperationCopy: Record<StageOperation, string> = {
+  loading: "Carregamento",
+  unloading: "Descarregamento"
 };
 
 const stopMeta: Record<
@@ -356,7 +397,7 @@ function getActiveLabel(route: TruckRoute, nowMinutes: number) {
   if (current) {
     if (current.type === "taiki") return `Em taiki até ${current.end}`;
     if (current.type === "lunch") return `Almoço até ${current.end}`;
-    return `No Stage ${current.stageNumber || "—"} até ${current.end}`;
+    return `${stageOperationCopy[current.stageOperation ?? "unloading"]} no Stage ${current.stageNumber || "—"} até ${current.end}`;
   }
   if (getStatus(route, nowMinutes) === "done") return "Rota finalizada";
   const next = route.stops.find((stop) => nowMinutes < toMinutes(stop.start));
@@ -474,7 +515,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
 
   const gpsPointStepCounts = useMemo(
     () => Object.fromEntries(
-      Object.entries(gpsPointConfigs).map(([pointId, stops]) => [pointId, stops.length])
+      Object.entries(gpsPointConfigs).map(([pointId, config]) => [pointId, config.stops.length])
     ),
     [gpsPointConfigs]
   );
@@ -506,7 +547,8 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
         .map((stop) => ({
           ...stop,
           label: stop.label.trim() || stopMeta[stop.type].label,
-          stageNumber: stop.stageNumber?.trim()
+          stageNumber: stop.stageNumber?.trim(),
+          stageOperation: stop.type === "stage" ? stop.stageOperation ?? "unloading" : undefined
         }))
         .sort((a, b) => a.start.localeCompare(b.start))
     };
@@ -547,24 +589,34 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
   }
 
   function openGpsPointConfig(point: GpxWaypoint) {
+    const current = gpsPointConfigs[point.id];
     setGpsPointDraft({
       point,
-      stops: (gpsPointConfigs[point.id] ?? []).map((stop) => ({ ...stop }))
+      startTime: current?.startTime ?? "",
+      arrivalTime: current?.arrivalTime ?? "",
+      stops: (current?.stops ?? []).map((stop) => ({ ...stop }))
     });
   }
 
-  function saveGpsPointConfig(pointId: string, stops: RouteStop[]) {
-    const cleanedStops = stops
+  function saveGpsPointConfig(pointId: string, config: GpsPointConfig) {
+    const cleanedStops = config.stops
       .map((stop) => ({
         ...stop,
         label: stop.label.trim() || stopMeta[stop.type].label,
-        stageNumber: stop.stageNumber?.trim()
+        stageNumber: stop.stageNumber?.trim(),
+        stageOperation: stop.type === "stage" ? stop.stageOperation ?? "unloading" : undefined
       }))
       .sort((first, second) => first.start.localeCompare(second.start));
 
     setGpsPointConfigs((current) => {
       const next = { ...current };
-      if (cleanedStops.length) next[pointId] = cleanedStops;
+      if (cleanedStops.length || config.startTime || config.arrivalTime) {
+        next[pointId] = {
+          startTime: config.startTime,
+          arrivalTime: config.arrivalTime,
+          stops: cleanedStops
+        };
+      }
       else delete next[pointId];
       return next;
     });
@@ -832,33 +884,40 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                   </button>
                 </div>
                 <div className="gpx-points-list">
-                  {gpxRoute.waypoints.map((point, index) => (
-                    <div className="gpx-point-row" key={point.id}>
-                      <button
-                        className="gpx-point-open"
-                        type="button"
-                        onClick={() => openGps(point.id)}
-                        aria-label={`Abrir ${point.name} no mapa GPS`}
-                      >
-                        <span>{index + 1}</span>
-                        <div>
-                          <strong>{point.name}</strong>
-                          <small>{waypointTimeLabel(point.time, point.description)}</small>
-                        </div>
-                        <MapPin size={14} />
-                      </button>
-                      <button
-                        className="gpx-point-configure"
-                        type="button"
-                        onClick={() => openGpsPointConfig(point)}
-                      >
-                        <Pencil size={12} />
-                        {gpsPointStepCounts[point.id]
-                          ? `${gpsPointStepCounts[point.id]} ${gpsPointStepCounts[point.id] === 1 ? "etapa" : "etapas"}`
-                          : "Configurar etapas"}
-                      </button>
-                    </div>
-                  ))}
+                  {gpxRoute.waypoints.map((point, index) => {
+                    const config = gpsPointConfigs[point.id];
+                    return (
+                      <div className="gpx-point-row" key={point.id}>
+                        <button
+                          className="gpx-point-open"
+                          type="button"
+                          onClick={() => openGps(point.id)}
+                          aria-label={`Abrir ${point.name} no mapa GPS`}
+                        >
+                          <span>{index + 1}</span>
+                          <div>
+                            <strong>{point.name}</strong>
+                            <small>
+                              {config?.startTime && config.arrivalTime
+                                ? `${config.startTime} → ${config.arrivalTime}`
+                                : waypointTimeLabel(point.time, point.description)}
+                            </small>
+                          </div>
+                          <MapPin size={14} />
+                        </button>
+                        <button
+                          className="gpx-point-configure"
+                          type="button"
+                          onClick={() => openGpsPointConfig(point)}
+                        >
+                          <Pencil size={12} />
+                          {gpsPointStepCounts[point.id]
+                            ? `${gpsPointStepCounts[point.id]} ${gpsPointStepCounts[point.id] === 1 ? "etapa" : "etapas"}`
+                            : "Configurar etapas"}
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -983,9 +1042,9 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       {gpsPointDraft && (
         <GpsPointConfigModal
           point={gpsPointDraft.point}
-          initialStops={gpsPointDraft.stops}
+          initialConfig={gpsPointDraft}
           onClose={() => setGpsPointDraft(null)}
-          onSave={(stops) => saveGpsPointConfig(gpsPointDraft.point.id, stops)}
+          onSave={(config) => saveGpsPointConfig(gpsPointDraft.point.id, config)}
         />
       )}
     </div>
@@ -1087,7 +1146,7 @@ function RouteDetail({
               icon={meta.icon}
               title={
                 stop.type === "stage"
-                  ? `Entrada — Stage ${stop.stageNumber || "—"}`
+                  ? `${stageOperationCopy[stop.stageOperation ?? "unloading"]} — Stage ${stop.stageNumber || "—"}`
                   : meta.label
               }
               subtitle={stop.label || meta.label}
@@ -1207,6 +1266,7 @@ function RouteModal({
       stage: {
         label: "Entrega",
         stageNumber: "",
+        stageOperation: "unloading",
         start: "08:00",
         end: "09:00"
       },
@@ -1332,7 +1392,8 @@ function RouteModal({
                             updateStop(stop.id, {
                               type,
                               label: stopMeta[type].label,
-                              stageNumber: type === "stage" ? stop.stageNumber : undefined
+                              stageNumber: type === "stage" ? stop.stageNumber : undefined,
+                              stageOperation: type === "stage" ? stop.stageOperation ?? "unloading" : undefined
                             });
                           }}
                         >
@@ -1350,17 +1411,34 @@ function RouteModal({
                       </div>
                       <div className="stop-fields">
                         {stop.type === "stage" && (
-                          <label className="field stage-field">
-                            <span>Nº do Stage</span>
-                            <input
-                              required
-                              value={stop.stageNumber ?? ""}
-                              onChange={(event) =>
-                                updateStop(stop.id, { stageNumber: event.target.value })
-                              }
-                              placeholder="05"
-                            />
-                          </label>
+                          <>
+                            <label className="field stage-field">
+                              <span>Nº do Stage</span>
+                              <input
+                                required
+                                value={stop.stageNumber ?? ""}
+                                onChange={(event) =>
+                                  updateStop(stop.id, { stageNumber: event.target.value })
+                                }
+                                placeholder="05"
+                              />
+                            </label>
+                            <label className="field stage-operation-field">
+                              <span>Operação</span>
+                              <select
+                                aria-label="Operação do Stage"
+                                value={stop.stageOperation ?? "unloading"}
+                                onChange={(event) =>
+                                  updateStop(stop.id, {
+                                    stageOperation: event.target.value as StageOperation
+                                  })
+                                }
+                              >
+                                <option value="loading">Carregamento</option>
+                                <option value="unloading">Descarregamento</option>
+                              </select>
+                            </label>
+                          </>
                         )}
                         <label className="field stop-name-field">
                           <span>Nome / observação</span>
@@ -1472,26 +1550,29 @@ function RouteModal({
 
 function GpsPointConfigModal({
   point,
-  initialStops,
+  initialConfig,
   onClose,
   onSave
 }: {
   point: GpxWaypoint;
-  initialStops: RouteStop[];
+  initialConfig: GpsPointConfig;
   onClose: () => void;
-  onSave: (stops: RouteStop[]) => void;
+  onSave: (config: GpsPointConfig) => void;
 }) {
-  const [stops, setStops] = useState(() => initialStops.map((stop) => ({ ...stop })));
   const waypointTime = waypointTimeLabel(point.time, point.description);
   const defaultStart = /^\d{2}:\d{2}$/.test(waypointTime) ? waypointTime : "08:00";
+  const [startTime, setStartTime] = useState(initialConfig.startTime || defaultStart);
+  const [arrivalTime, setArrivalTime] = useState(initialConfig.arrivalTime || defaultStart);
+  const [stops, setStops] = useState(() => initialConfig.stops.map((stop) => ({ ...stop })));
 
   function addStop(type: StopType) {
-    const start = stops.at(-1)?.end || defaultStart;
+    const start = stops.at(-1)?.end || arrivalTime || startTime || defaultStart;
     const duration = type === "stage" ? 60 : type === "taiki" ? 30 : 60;
     const defaults: Record<StopType, Omit<RouteStop, "id" | "type">> = {
       stage: {
         label: "Entrega",
         stageNumber: "",
+        stageOperation: "unloading",
         start,
         end: minutesToTime(Math.min(toMinutes(start) + duration, 23 * 60 + 59))
       },
@@ -1519,7 +1600,7 @@ function GpsPointConfigModal({
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    onSave(stops);
+    onSave({ startTime, arrivalTime, stops });
   }
 
   return (
@@ -1548,6 +1629,39 @@ function GpsPointConfigModal({
               <div className="form-section-title">
                 <span>1</span>
                 <div>
+                  <h3>Horários deste ponto</h3>
+                  <p>Defina quando o caminhão inicia e chega nesta localização.</p>
+                </div>
+              </div>
+              <div className="form-grid gps-point-times-grid">
+                <label className="field">
+                  <span>Horário de início</span>
+                  <input
+                    type="time"
+                    aria-label="Horário de início do ponto"
+                    required
+                    value={startTime}
+                    onChange={(event) => setStartTime(event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>Horário de chegada</span>
+                  <input
+                    type="time"
+                    aria-label="Horário de chegada do ponto"
+                    required
+                    min={startTime}
+                    value={arrivalTime}
+                    onChange={(event) => setArrivalTime(event.target.value)}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="form-section">
+              <div className="form-section-title">
+                <span>2</span>
+                <div>
                   <h3>Etapas deste ponto</h3>
                   <p>Adicione Stage, Taiki e almoço para esta localização.</p>
                 </div>
@@ -1569,9 +1683,10 @@ function GpsPointConfigModal({
                             onChange={(event) => {
                               const type = event.target.value as StopType;
                               updateStop(stop.id, {
-                                type,
-                                label: stopMeta[type].label,
-                                stageNumber: type === "stage" ? stop.stageNumber : undefined
+                              type,
+                              label: stopMeta[type].label,
+                              stageNumber: type === "stage" ? stop.stageNumber : undefined,
+                              stageOperation: type === "stage" ? stop.stageOperation ?? "unloading" : undefined
                               });
                             }}
                           >
@@ -1588,7 +1703,8 @@ function GpsPointConfigModal({
                           </button>
                         </div>
                         <div className="stop-fields">
-                          {stop.type === "stage" && (
+                        {stop.type === "stage" && (
+                          <>
                             <label className="field stage-field">
                               <span>Nº do Stage</span>
                               <input
@@ -1598,7 +1714,23 @@ function GpsPointConfigModal({
                                 placeholder="05"
                               />
                             </label>
-                          )}
+                            <label className="field stage-operation-field">
+                              <span>Operação</span>
+                              <select
+                                aria-label="Operação do Stage"
+                                value={stop.stageOperation ?? "unloading"}
+                                onChange={(event) =>
+                                  updateStop(stop.id, {
+                                    stageOperation: event.target.value as StageOperation
+                                  })
+                                }
+                              >
+                                <option value="loading">Carregamento</option>
+                                <option value="unloading">Descarregamento</option>
+                              </select>
+                            </label>
+                          </>
+                        )}
                           <label className="field stop-name-field">
                             <span>Nome / observação</span>
                             <input
@@ -1784,8 +1916,8 @@ function BackupModal({
             <div>
               <strong>Um arquivo, toda a configuração</strong>
               <p>
-                O backup inclui destinos, horários, stages, taikis, almoços e
-                números dos caminhões.
+                O backup inclui pontos fixos, rotas, horários, stages, taikis,
+                almoços e configurações dos pontos GPS.
               </p>
             </div>
           </div>

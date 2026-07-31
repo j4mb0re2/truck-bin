@@ -1536,6 +1536,11 @@ button {
   gap: 13px;
 }
 
+.gps-point-times-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 420px;
+}
+
 .field {
   min-width: 0;
   display: flex;
@@ -1713,16 +1718,18 @@ button {
 
 .stop-fields {
   display: grid;
-  grid-template-columns: 0.75fr 1.6fr 0.9fr 0.9fr;
+  grid-template-columns: 0.72fr 1.2fr 1.4fr 0.9fr 0.9fr;
   gap: 10px;
 }
 
-.stop-fields .field input {
+.stop-fields .field input,
+.stop-fields .field select {
+  width: 100%;
   height: 36px;
 }
 
 .stop-name-field:first-child {
-  grid-column: span 2;
+  grid-column: span 3;
 }
 
 .add-stop-row {
@@ -2598,6 +2605,10 @@ button {
 
   .form-grid > .field:last-child {
     grid-column: span 2;
+  }
+
+  .gps-point-times-grid > .field:last-child {
+    grid-column: auto;
   }
 
   .stop-fields {
