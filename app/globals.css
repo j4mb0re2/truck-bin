@@ -1541,6 +1541,44 @@ button {
   max-width: 420px;
 }
 
+.gps-point-times-grid > .field:only-child {
+  grid-column: span 2;
+}
+
+.gps-time-options {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.gps-time-option {
+  min-height: 39px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #526164;
+  background: #f7f9f9;
+  border: 1px solid #dce2e2;
+  border-radius: 9px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.gps-time-option:has(input:checked) {
+  color: var(--orange-dark);
+  background: var(--orange-soft);
+  border-color: #efc5af;
+}
+
+.gps-time-option input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--orange);
+}
+
 .field {
   min-width: 0;
   display: flex;
@@ -2609,6 +2647,15 @@ button {
 
   .gps-point-times-grid > .field:last-child {
     grid-column: auto;
+  }
+
+  .gps-point-times-grid > .field:only-child {
+    grid-column: span 2;
+  }
+
+  .gps-time-options {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .stop-fields {

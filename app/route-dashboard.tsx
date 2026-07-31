@@ -217,16 +217,18 @@ function normalizeGpsPointConfigs(value: unknown): GpsPointConfigs {
       config &&
       typeof config === "object" &&
       !Array.isArray(config) &&
-      typeof (config as Partial<GpsPointConfig>).startTime === "string" &&
-      typeof (config as Partial<GpsPointConfig>).arrivalTime === "string" &&
+      ((config as Partial<GpsPointConfig>).startTime === undefined ||
+        typeof (config as Partial<GpsPointConfig>).startTime === "string") &&
+      ((config as Partial<GpsPointConfig>).arrivalTime === undefined ||
+        typeof (config as Partial<GpsPointConfig>).arrivalTime === "string") &&
       Array.isArray((config as Partial<GpsPointConfig>).stops) &&
       (config as Partial<GpsPointConfig>).stops?.every(isValidStop)
     ) {
-      const saved = config as GpsPointConfig;
+      const saved = config as Partial<GpsPointConfig>;
       configs[pointId] = {
-        startTime: saved.startTime,
-        arrivalTime: saved.arrivalTime,
-        stops: saved.stops.map((stop) => ({ ...stop }))
+        startTime: saved.startTime ?? "",
+        arrivalTime: saved.arrivalTime ?? "",
+        stops: saved.stops?.map((stop) => ({ ...stop })) ?? []
       };
     }
     return configs;
@@ -407,6 +409,15 @@ function getActiveLabel(route: TruckRoute, nowMinutes: number) {
 function waypointTimeLabel(time: string, description: string) {
   const descriptionTime = description.match(/\b(\d{2}:\d{2})(?::\d{2})?\b/)?.[1];
   return descriptionTime ?? (time ? time.slice(11, 16) : "Ponto GPS");
+}
+
+function gpsPointScheduleLabel(config: GpsPointConfig | undefined, fallback: string) {
+  const labels = [
+    config?.startTime ? `Início ${config.startTime}` : "",
+    config?.arrivalTime ? `Chegada ${config.arrivalTime}` : ""
+  ].filter(Boolean);
+
+  return labels.join(" · ") || fallback;
 }
 
 export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
@@ -898,9 +909,10 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                           <div>
                             <strong>{point.name}</strong>
                             <small>
-                              {config?.startTime && config.arrivalTime
-                                ? `${config.startTime} → ${config.arrivalTime}`
-                                : waypointTimeLabel(point.time, point.description)}
+                              {gpsPointScheduleLabel(
+                                config,
+                                waypointTimeLabel(point.time, point.description)
+                              )}
                             </small>
                           </div>
                           <MapPin size={14} />
@@ -913,6 +925,8 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                           <Pencil size={12} />
                           {gpsPointStepCounts[point.id]
                             ? `${gpsPointStepCounts[point.id]} ${gpsPointStepCounts[point.id] === 1 ? "etapa" : "etapas"}`
+                            : config?.startTime || config?.arrivalTime
+                              ? "Editar horários"
                             : "Configurar etapas"}
                         </button>
                       </div>
@@ -1561,12 +1575,18 @@ function GpsPointConfigModal({
 }) {
   const waypointTime = waypointTimeLabel(point.time, point.description);
   const defaultStart = /^\d{2}:\d{2}$/.test(waypointTime) ? waypointTime : "08:00";
-  const [startTime, setStartTime] = useState(initialConfig.startTime || defaultStart);
-  const [arrivalTime, setArrivalTime] = useState(initialConfig.arrivalTime || defaultStart);
+  const [hasStartTime, setHasStartTime] = useState(Boolean(initialConfig.startTime));
+  const [hasArrivalTime, setHasArrivalTime] = useState(Boolean(initialConfig.arrivalTime));
+  const [startTime, setStartTime] = useState(initialConfig.startTime);
+  const [arrivalTime, setArrivalTime] = useState(initialConfig.arrivalTime);
   const [stops, setStops] = useState(() => initialConfig.stops.map((stop) => ({ ...stop })));
 
   function addStop(type: StopType) {
-    const start = stops.at(-1)?.end || arrivalTime || startTime || defaultStart;
+    const start =
+      stops.at(-1)?.end ||
+      (hasArrivalTime ? arrivalTime : "") ||
+      (hasStartTime ? startTime : "") ||
+      defaultStart;
     const duration = type === "stage" ? 60 : type === "taiki" ? 30 : 60;
     const defaults: Record<StopType, Omit<RouteStop, "id" | "type">> = {
       stage: {
@@ -1600,7 +1620,11 @@ function GpsPointConfigModal({
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    onSave({ startTime, arrivalTime, stops });
+    onSave({
+      startTime: hasStartTime ? startTime : "",
+      arrivalTime: hasArrivalTime ? arrivalTime : "",
+      stops
+    });
   }
 
   return (
@@ -1629,33 +1653,57 @@ function GpsPointConfigModal({
               <div className="form-section-title">
                 <span>1</span>
                 <div>
-                  <h3>Horários deste ponto</h3>
-                  <p>Defina quando o caminhão inicia e chega nesta localização.</p>
+                  <h3>Horários opcionais</h3>
+                  <p>Marque início e chegada somente nos pontos de referência certos.</p>
                 </div>
               </div>
-              <div className="form-grid gps-point-times-grid">
-                <label className="field">
-                  <span>Horário de início</span>
+              <div className="gps-time-options" role="group" aria-label="Horários do ponto GPS">
+                <label className="gps-time-option">
                   <input
-                    type="time"
-                    aria-label="Horário de início do ponto"
-                    required
-                    value={startTime}
-                    onChange={(event) => setStartTime(event.target.value)}
+                    type="checkbox"
+                    checked={hasStartTime}
+                    onChange={(event) => setHasStartTime(event.target.checked)}
                   />
+                  <span>Adicionar horário de início</span>
                 </label>
-                <label className="field">
-                  <span>Horário de chegada</span>
+                <label className="gps-time-option">
                   <input
-                    type="time"
-                    aria-label="Horário de chegada do ponto"
-                    required
-                    min={startTime}
-                    value={arrivalTime}
-                    onChange={(event) => setArrivalTime(event.target.value)}
+                    type="checkbox"
+                    checked={hasArrivalTime}
+                    onChange={(event) => setHasArrivalTime(event.target.checked)}
                   />
+                  <span>Adicionar horário de chegada</span>
                 </label>
               </div>
+
+              {(hasStartTime || hasArrivalTime) && (
+                <div className="form-grid gps-point-times-grid">
+                  {hasStartTime && (
+                    <label className="field">
+                      <span>Horário de início</span>
+                      <input
+                        type="time"
+                        aria-label="Horário de início do ponto"
+                        required
+                        value={startTime}
+                        onChange={(event) => setStartTime(event.target.value)}
+                      />
+                    </label>
+                  )}
+                  {hasArrivalTime && (
+                    <label className="field">
+                      <span>Horário de chegada</span>
+                      <input
+                        type="time"
+                        aria-label="Horário de chegada do ponto"
+                        required
+                        value={arrivalTime}
+                        onChange={(event) => setArrivalTime(event.target.value)}
+                      />
+                    </label>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="form-section">
