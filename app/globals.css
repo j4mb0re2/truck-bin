@@ -612,6 +612,7 @@ button {
 }
 
 .gpx-point-row {
+  --route-point-color: var(--blue);
   min-width: 0;
   overflow: hidden;
   background: #fff;
@@ -640,6 +641,14 @@ button {
   border-color: #bcd9e5;
 }
 
+.gpx-point-row.has-route-segment {
+  border-left: 3px solid var(--route-point-color);
+}
+
+.gpx-point-row.has-route-segment:hover {
+  border-color: var(--route-point-color);
+}
+
 .gpx-point-row.is-dragging {
   opacity: 0.45;
   border-style: dashed;
@@ -665,6 +674,16 @@ button {
   border-radius: 50%;
   font-size: 8px;
   font-weight: 800;
+}
+
+.gpx-point-row.has-route-segment .gpx-point-open > span {
+  color: #fff;
+  background: var(--route-point-color);
+}
+
+.gpx-point-row.has-route-segment .gpx-point-open > svg,
+.gpx-point-row.has-route-segment .gpx-point-configure {
+  color: var(--route-point-color);
 }
 
 .gpx-points-list strong,
@@ -2513,6 +2532,13 @@ button {
   background: var(--orange);
 }
 
+.gps-route-marker.has-route-segment > span,
+.gps-waypoint-marker.has-route-segment > span {
+  color: #fff;
+  background: var(--route-point-color);
+  border-color: var(--route-point-color);
+}
+
 .gps-waypoint-marker > span {
   width: 24px;
   height: 24px;
@@ -2537,6 +2563,15 @@ button {
 .gps-waypoint-marker.has-steps > span {
   border-color: var(--green);
   box-shadow: 0 0 0 4px rgba(54, 144, 111, 0.16), 0 3px 9px rgba(44, 109, 158, 0.18);
+}
+
+.gps-waypoint-marker.has-route-segment.has-steps > span {
+  border-color: var(--route-point-color);
+}
+
+.gps-waypoint-marker.has-route-segment.is-focused > span {
+  background: var(--route-point-color);
+  border-color: var(--route-point-color);
 }
 
 @media (max-width: 1120px) {

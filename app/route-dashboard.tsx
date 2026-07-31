@@ -29,8 +29,14 @@ import {
   X
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { GpsTrackingView } from "./gps-tracking-view";
 import type { GpxCoordinate, GpxRouteData, GpxWaypoint } from "../lib/gpx-route";
+import {
+  matchPointToRouteSegment,
+  routeSegmentColor,
+  routeSegmentLabel
+} from "../lib/route-segment-utils";
 
 type StopType = "stage" | "taiki" | "lunch";
 type StageOperation = "loading" | "unloading";
@@ -686,6 +692,21 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     [gpxRoute.waypoints, gpsPointCatalog]
   );
 
+  const gpsPointSegmentIndexes = useMemo(() => {
+    const segmentIndexes: Record<string, number> = {};
+
+    gpsPoints.forEach((point) => {
+      const segmentIndex = matchPointToRouteSegment(
+        point,
+        gpxRoute.segments,
+        gpxRoute.segmentTimings
+      );
+      if (segmentIndex !== null) segmentIndexes[point.id] = segmentIndex;
+    });
+
+    return segmentIndexes;
+  }, [gpxRoute.segmentTimings, gpxRoute.segments, gpsPoints]);
+
   const gpsRouteForView = useMemo(
     () => ({ ...gpxRoute, waypoints: gpsPoints }),
     [gpxRoute, gpsPoints]
@@ -1068,6 +1089,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
         <GpsTrackingView
           route={gpsRouteForView}
           pointStepCounts={gpsPointStepCounts}
+          pointSegmentIndexes={gpsPointSegmentIndexes}
           initialWaypointId={gpsFocusPointId}
           onAddPoint={addGpsPointFromMap}
           onEditPoint={openGpsPointEditorById}
@@ -1268,6 +1290,11 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                 <div className="gpx-points-list">
                   {gpsPoints.map((point, index) => {
                     const config = gpsPointConfigs[point.id];
+                    const segmentIndex = gpsPointSegmentIndexes[point.id];
+                    const segmentColor =
+                      segmentIndex === undefined ? undefined : routeSegmentColor(segmentIndex);
+                    const segmentLabel =
+                      segmentIndex === undefined ? "" : routeSegmentLabel(segmentIndex);
                     const isDraggingPoint = gpsPointDrag?.activeId === point.id;
                     const isDropTarget = Boolean(
                       gpsPointDrag &&
@@ -1276,9 +1303,14 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                     );
                     return (
                       <div
-                        className={`gpx-point-row${isDraggingPoint ? " is-dragging" : ""}${isDropTarget ? " is-drop-target" : ""}`}
+                        className={`gpx-point-row${segmentColor ? " has-route-segment" : ""}${isDraggingPoint ? " is-dragging" : ""}${isDropTarget ? " is-drop-target" : ""}`}
                         key={point.id}
                         data-gps-point-id={point.id}
+                        style={
+                          segmentColor
+                            ? ({ "--route-point-color": segmentColor } as CSSProperties)
+                            : undefined
+                        }
                         ref={(node) => {
                           gpsPointRowsRef.current[point.id] = node;
                         }}
@@ -1287,16 +1319,14 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                           className="gpx-point-open"
                           type="button"
                           onClick={() => openGps(point.id)}
-                          aria-label={`Abrir ${point.name} no mapa GPS`}
+                          aria-label={`Abrir ${point.name}${segmentLabel ? `, ${segmentLabel}` : ""} no mapa GPS`}
                         >
-                          <span>{index + 1}</span>
+                          <span title={segmentLabel || undefined}>{index + 1}</span>
                           <div>
                             <strong>{point.name}</strong>
                             <small>
-                              {gpsPointScheduleLabel(
-                                config,
-                                waypointTimeLabel(point.time, point.description)
-                              )}
+                              {segmentIndex === undefined ? "" : `Trecho ${segmentIndex + 1} · `}
+                              {gpsPointScheduleLabel(config, waypointTimeLabel(point.time, point.description))}
                             </small>
                           </div>
                           <MapPin size={14} />

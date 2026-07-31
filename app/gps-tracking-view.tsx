@@ -11,8 +11,13 @@ import {
   Satellite,
   TriangleAlert
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GpxCoordinate, GpxRouteData } from "../lib/gpx-route";
+import {
+  getRenderedRouteSegments,
+  routeSegmentColor,
+  routeSegmentLabel
+} from "../lib/route-segment-utils";
 
 type GpsState = "idle" | "searching" | "tracking" | "error";
 type LivePosition = {
@@ -22,26 +27,6 @@ type LivePosition = {
   updatedAt: string;
 };
 type LeafletApi = typeof import("leaflet");
-
-const ROUTE_SEGMENT_COLORS = [
-  "#e76f32",
-  "#247ba0",
-  "#2f855a",
-  "#805ad5",
-  "#c05676",
-  "#008f8c",
-  "#bf8a20",
-  "#5f7185"
-] as const;
-
-function routeSegmentColor(index: number) {
-  return ROUTE_SEGMENT_COLORS[index % ROUTE_SEGMENT_COLORS.length];
-}
-
-function routeSegmentLabel(index: number) {
-  if (index === 0) return "Trecho 1 — início da gravação";
-  return `Trecho ${index + 1} — retomada após pausa`;
-}
 
 function formatWaypointTime(time: string, description: string) {
   const fromDescription = description.match(/\b(\d{2}:\d{2})(?::\d{2})?\b/)?.[1];
@@ -68,6 +53,7 @@ function tooltipText(content: string) {
 export function GpsTrackingView({
   route,
   pointStepCounts,
+  pointSegmentIndexes,
   initialWaypointId,
   onAddPoint,
   onEditPoint,
@@ -75,6 +61,7 @@ export function GpsTrackingView({
 }: {
   route: GpxRouteData;
   pointStepCounts: Record<string, number>;
+  pointSegmentIndexes: Record<string, number>;
   initialWaypointId: string | null;
   onAddPoint: (coordinate: GpxCoordinate) => void;
   onEditPoint: (pointId: string) => void;
@@ -109,7 +96,10 @@ export function GpsTrackingView({
     addPointModeRef.current = isAddingPoint;
   }, [isAddingPoint]);
 
-  const visibleRouteSegments = route.segments.filter((segment) => segment.length > 1);
+  const visibleRouteSegments = useMemo(
+    () => getRenderedRouteSegments(route.segments, route.segmentTimings),
+    [route.segmentTimings, route.segments]
+  );
   const hasRoute = visibleRouteSegments.length > 0;
   const initialWaypoint = route.waypoints.find((point) => point.id === initialWaypointId);
 
@@ -259,15 +249,11 @@ export function GpsTrackingView({
       activeMap.on("click", onMapClick);
 
       const allCoordinates: [number, number][] = [];
-      let routeSegmentIndex = 0;
-      route.segments.forEach((segment) => {
-        const coordinates = segment.map(
+      visibleRouteSegments.forEach((segment) => {
+        const coordinates = segment.points.map(
           (point) => [point.latitude, point.longitude] as [number, number]
         );
-        if (coordinates.length < 2) return;
-
-        const color = routeSegmentColor(routeSegmentIndex);
-        routeSegmentIndex += 1;
+        const color = routeSegmentColor(segment.index);
         allCoordinates.push(...coordinates);
         leaflet
           .polyline(coordinates, {
@@ -280,49 +266,56 @@ export function GpsTrackingView({
           .addTo(activeMap);
       });
 
+      const firstSegment = visibleRouteSegments.at(0);
+      const lastSegment = visibleRouteSegments.at(-1);
       const firstPoint = allCoordinates.at(0);
       const lastPoint = allCoordinates.at(-1);
       if (firstPoint) {
         leaflet
           .marker(firstPoint, {
             icon: leaflet.divIcon({
-              className: "gps-route-marker gps-start-marker",
-              html: "<span>Início</span>",
+              className: "gps-route-marker gps-start-marker has-route-segment",
+              html: `<span style="--route-point-color:${routeSegmentColor(firstSegment?.index ?? 0)}">Início</span>`,
               iconSize: [58, 30],
               iconAnchor: [29, 15]
             })
           })
-          .bindTooltip(tooltipText("Início do arquivo GPX"))
+          .bindTooltip(tooltipText(`Início do arquivo GPX · ${routeSegmentLabel(firstSegment?.index ?? 0)}`))
           .addTo(activeMap);
       }
       if (lastPoint) {
         leaflet
           .marker(lastPoint, {
             icon: leaflet.divIcon({
-              className: "gps-route-marker gps-end-marker",
-              html: "<span>Fim</span>",
+              className: "gps-route-marker gps-end-marker has-route-segment",
+              html: `<span style="--route-point-color:${routeSegmentColor(lastSegment?.index ?? 0)}">Fim</span>`,
               iconSize: [46, 30],
               iconAnchor: [23, 15]
             })
           })
-          .bindTooltip(tooltipText("Fim do arquivo GPX"))
+          .bindTooltip(tooltipText(`Fim do arquivo GPX · ${routeSegmentLabel(lastSegment?.index ?? 0)}`))
           .addTo(activeMap);
       }
 
       route.waypoints.forEach((point, index) => {
         const stepCount = pointStepCounts[point.id] ?? 0;
+        const segmentIndex = pointSegmentIndexes[point.id];
+        const segmentColor =
+          segmentIndex === undefined ? undefined : routeSegmentColor(segmentIndex);
+        const segmentLabel =
+          segmentIndex === undefined ? "" : ` · ${routeSegmentLabel(segmentIndex)}`;
         const waypointMarker = leaflet
           .marker([point.latitude, point.longitude], {
             icon: leaflet.divIcon({
-              className: `gps-waypoint-marker${point.id === initialWaypointId ? " is-focused" : ""}${stepCount ? " has-steps" : ""}`,
-              html: `<span>${index + 1}</span>`,
+              className: `gps-waypoint-marker${segmentColor ? " has-route-segment" : ""}${point.id === initialWaypointId ? " is-focused" : ""}${stepCount ? " has-steps" : ""}`,
+              html: `<span${segmentColor ? ` style="--route-point-color:${segmentColor}"` : ""}>${index + 1}</span>`,
               iconSize: [28, 28],
               iconAnchor: [14, 14]
             })
           })
           .bindTooltip(
             tooltipText(
-              `${point.name} · ${formatWaypointTime(point.time, point.description)}${stepCount ? ` · ${stepCount} etapa${stepCount === 1 ? "" : "s"}` : ""}`
+              `${point.name}${segmentLabel} · ${formatWaypointTime(point.time, point.description)}${stepCount ? ` · ${stepCount} etapa${stepCount === 1 ? "" : "s"}` : ""}`
             )
           )
           .addTo(activeMap);
@@ -367,7 +360,7 @@ export function GpsTrackingView({
       if (mapRef.current === null) leafletRef.current = null;
       setMapReady(false);
     };
-  }, [initialWaypoint, initialWaypointId, pointStepCounts, route, updateTruckMarker]);
+  }, [initialWaypoint, initialWaypointId, pointSegmentIndexes, pointStepCounts, route, updateTruckMarker, visibleRouteSegments]);
 
   useEffect(() => stopTracking, [stopTracking]);
 
@@ -492,14 +485,14 @@ export function GpsTrackingView({
               </div>
               <p>As cores do mapa mudam quando o GPS voltou a gravar a rota.</p>
               <ol>
-                {visibleRouteSegments.map((_, index) => (
-                  <li key={index}>
+                {visibleRouteSegments.map((segment) => (
+                  <li key={segment.index}>
                     <span
                       className="gps-segment-swatch"
-                      style={{ backgroundColor: routeSegmentColor(index) }}
+                      style={{ backgroundColor: routeSegmentColor(segment.index) }}
                       aria-hidden="true"
                     />
-                    <span>{routeSegmentLabel(index)}</span>
+                    <span>{routeSegmentLabel(segment.index)}</span>
                   </li>
                 ))}
               </ol>

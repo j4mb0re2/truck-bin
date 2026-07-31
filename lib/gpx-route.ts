@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import type { RouteSegmentTiming } from "./route-segment-utils";
 
 export type GpxCoordinate = {
   latitude: number;
@@ -15,6 +16,7 @@ export type GpxWaypoint = GpxCoordinate & {
 
 export type GpxRouteData = {
   segments: GpxCoordinate[][];
+  segmentTimings: RouteSegmentTiming[];
   waypoints: GpxWaypoint[];
   totalTrackPoints: number;
   renderedTrackPoints: number;
@@ -22,6 +24,7 @@ export type GpxRouteData = {
 
 const EMPTY_ROUTE: GpxRouteData = {
   segments: [],
+  segmentTimings: [],
   waypoints: [],
   totalTrackPoints: 0,
   renderedTrackPoints: 0
@@ -52,6 +55,22 @@ function parseTrackPoints(xml: string) {
   }
 
   return points;
+}
+
+function parseSegmentTiming(xml: string): RouteSegmentTiming {
+  const expression = /<trkpt\b[^>]*>([\s\S]*?)<\/trkpt>/gi;
+  let match: RegExpExecArray | null;
+  let startTime = "";
+  let endTime = "";
+
+  while ((match = expression.exec(xml))) {
+    const time = readTagText(match[1], "time");
+    if (!time) continue;
+    if (!startTime) startTime = time;
+    endTime = time;
+  }
+
+  return { startTime, endTime };
 }
 
 function parseWaypoints(xml: string) {
@@ -93,23 +112,27 @@ function sampleSegment(points: GpxCoordinate[], maxPoints: number) {
 export function loadGpxRoute(): GpxRouteData {
   try {
     const source = readFileSync(path.join(process.cwd(), "rota.gpx"), "utf8");
-    const rawSegments: GpxCoordinate[][] = [];
+    const rawSegments: Array<{ points: GpxCoordinate[]; timing: RouteSegmentTiming }> = [];
     const segmentExpression = /<trkseg\b[^>]*>([\s\S]*?)<\/trkseg>/gi;
     let segmentMatch: RegExpExecArray | null;
 
     while ((segmentMatch = segmentExpression.exec(source))) {
       const points = parseTrackPoints(segmentMatch[1]);
-      if (points.length) rawSegments.push(points);
+      if (points.length) {
+        rawSegments.push({ points, timing: parseSegmentTiming(segmentMatch[1]) });
+      }
     }
 
     const nonEmptySegments = rawSegments.length || 1;
     const maxPerSegment = Math.max(120, Math.floor(MAX_RENDERED_POINTS / nonEmptySegments));
-    const segments = rawSegments.map((segment) => sampleSegment(segment, maxPerSegment));
-    const totalTrackPoints = rawSegments.reduce((total, segment) => total + segment.length, 0);
+    const segments = rawSegments.map(({ points }) => sampleSegment(points, maxPerSegment));
+    const segmentTimings = rawSegments.map(({ timing }) => timing);
+    const totalTrackPoints = rawSegments.reduce((total, segment) => total + segment.points.length, 0);
     const renderedTrackPoints = segments.reduce((total, segment) => total + segment.length, 0);
 
     return {
       segments,
+      segmentTimings,
       waypoints: parseWaypoints(source),
       totalTrackPoints,
       renderedTrackPoints
