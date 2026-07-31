@@ -23,6 +23,26 @@ type LivePosition = {
 };
 type LeafletApi = typeof import("leaflet");
 
+const ROUTE_SEGMENT_COLORS = [
+  "#e76f32",
+  "#247ba0",
+  "#2f855a",
+  "#805ad5",
+  "#c05676",
+  "#008f8c",
+  "#bf8a20",
+  "#5f7185"
+] as const;
+
+function routeSegmentColor(index: number) {
+  return ROUTE_SEGMENT_COLORS[index % ROUTE_SEGMENT_COLORS.length];
+}
+
+function routeSegmentLabel(index: number) {
+  if (index === 0) return "Trecho 1 — início da gravação";
+  return `Trecho ${index + 1} — retomada após pausa`;
+}
+
 function formatWaypointTime(time: string, description: string) {
   const fromDescription = description.match(/\b(\d{2}:\d{2})(?::\d{2})?\b/)?.[1];
   if (fromDescription) return fromDescription;
@@ -89,7 +109,8 @@ export function GpsTrackingView({
     addPointModeRef.current = isAddingPoint;
   }, [isAddingPoint]);
 
-  const hasRoute = route.segments.some((segment) => segment.length > 1);
+  const visibleRouteSegments = route.segments.filter((segment) => segment.length > 1);
+  const hasRoute = visibleRouteSegments.length > 0;
   const initialWaypoint = route.waypoints.find((point) => point.id === initialWaypointId);
 
   const centerRoute = useCallback(() => {
@@ -238,15 +259,19 @@ export function GpsTrackingView({
       activeMap.on("click", onMapClick);
 
       const allCoordinates: [number, number][] = [];
+      let routeSegmentIndex = 0;
       route.segments.forEach((segment) => {
         const coordinates = segment.map(
           (point) => [point.latitude, point.longitude] as [number, number]
         );
         if (coordinates.length < 2) return;
+
+        const color = routeSegmentColor(routeSegmentIndex);
+        routeSegmentIndex += 1;
         allCoordinates.push(...coordinates);
         leaflet
           .polyline(coordinates, {
-            color: "#e76f32",
+            color,
             weight: 5,
             opacity: 0.9,
             lineCap: "round",
@@ -458,6 +483,28 @@ export function GpsTrackingView({
               <strong>{route.waypoints.length} pontos em Minhas rotas</strong>
             </div>
           </div>
+
+          {visibleRouteSegments.length > 1 && (
+            <section className="gps-segment-legend" aria-labelledby="gps-segment-legend-title">
+              <div className="gps-segment-legend-heading">
+                <h3 id="gps-segment-legend-title">Pausas e retomadas</h3>
+                <span>{visibleRouteSegments.length} trechos</span>
+              </div>
+              <p>As cores do mapa mudam quando o GPS voltou a gravar a rota.</p>
+              <ol>
+                {visibleRouteSegments.map((_, index) => (
+                  <li key={index}>
+                    <span
+                      className="gps-segment-swatch"
+                      style={{ backgroundColor: routeSegmentColor(index) }}
+                      aria-hidden="true"
+                    />
+                    <span>{routeSegmentLabel(index)}</span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
 
           <p className="gps-privacy-note">
             O app não envia sua posição para outra pessoa. Para rastreamento remoto, será preciso conectar um GPS/telefone do caminhão a uma base de dados.
