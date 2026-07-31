@@ -640,6 +640,17 @@ button {
   border-color: #bcd9e5;
 }
 
+.gpx-point-row.is-dragging {
+  opacity: 0.45;
+  border-style: dashed;
+  transform: scale(0.98);
+}
+
+.gpx-point-row.is-drop-target {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px var(--blue-soft);
+}
+
 .gpx-point-open:hover {
   background: #fafeff;
 }
@@ -704,6 +715,35 @@ button {
 .gpx-point-actions .gpx-point-configure {
   width: auto;
   flex: 1;
+}
+
+.gpx-point-drag-handle {
+  width: 30px;
+  flex: 0 0 30px;
+  border: 0;
+  border-right: 1px solid #e0eaee;
+  display: grid;
+  place-items: center;
+  color: #687e86;
+  background: #fff;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.gpx-point-drag-handle:hover {
+  color: var(--blue);
+  background: var(--blue-soft);
+}
+
+.gpx-point-drag-handle:active,
+.gpx-point-row.is-dragging .gpx-point-drag-handle {
+  cursor: grabbing;
+}
+
+.gpx-point-drag-handle:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .gpx-point-edit {
@@ -2581,6 +2621,17 @@ button {
   }
 
   .gps-launch-button svg {
+    width: 19px;
+    height: 19px;
+  }
+
+  .export-project-button {
+    width: 42px;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .export-project-button svg {
     width: 19px;
     height: 19px;
   }

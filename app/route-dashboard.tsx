@@ -12,6 +12,7 @@ import {
   ExternalLink,
   Fuel,
   FileJson,
+  GripVertical,
   Map,
   MapPin,
   Menu,
@@ -27,7 +28,7 @@ import {
   Upload,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GpsTrackingView } from "./gps-tracking-view";
 import type { GpxCoordinate, GpxRouteData, GpxWaypoint } from "../lib/gpx-route";
 
@@ -84,6 +85,18 @@ type GpsPointEditDraft = {
   point: ResolvedGpsPoint;
   position: number;
   isNew: boolean;
+};
+type GpsPointDragState = {
+  activeId: string;
+  overId: string;
+};
+type GpsPointDragSession = {
+  pointerId: number;
+  activeId: string;
+  originX: number;
+  originY: number;
+  active: boolean;
+  overId: string;
 };
 
 const STORAGE_KEY = "roteiro-truck-routes-v1";
@@ -307,6 +320,20 @@ function normalizeGpsPointCatalog(value: unknown): GpsPointCatalog {
   return { manualPoints, pointNames, pointOrder };
 }
 
+function getGpsPointOrder(gpxPoints: GpxWaypoint[], catalog: GpsPointCatalog) {
+  const knownIds = Array.from(
+    new Set([
+      ...gpxPoints.map((point) => point.id),
+      ...catalog.manualPoints.map((point) => point.id)
+    ])
+  );
+  const knownIdSet = new Set(knownIds);
+  const savedOrder = catalog.pointOrder.filter((id) => knownIdSet.has(id));
+  const orderedIdSet = new Set(savedOrder);
+
+  return [...savedOrder, ...knownIds.filter((id) => !orderedIdSet.has(id))];
+}
+
 function resolveGpsPoints(
   gpxPoints: GpxWaypoint[],
   catalog: GpsPointCatalog
@@ -326,12 +353,9 @@ function resolveGpsPoints(
   const pointsById = new globalThis.Map<string, ResolvedGpsPoint>(
     points.map((point) => [point.id, point])
   );
-  const orderedPoints = catalog.pointOrder
+  return getGpsPointOrder(gpxPoints, catalog)
     .map((id) => pointsById.get(id))
     .filter((point): point is ResolvedGpsPoint => Boolean(point));
-  const orderedIds = new Set(orderedPoints.map((point) => point.id));
-
-  return [...orderedPoints, ...points.filter((point) => !orderedIds.has(point.id))];
 }
 
 function localISODate(date = new Date()) {
@@ -543,6 +567,18 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     EMPTY_GPS_POINT_CATALOG
   );
   const [gpsPointEditDraft, setGpsPointEditDraft] = useState<GpsPointEditDraft | null>(null);
+  const [gpsPointDrag, setGpsPointDrag] = useState<GpsPointDragState | null>(null);
+  const gpsPointRowsRef = useRef<Record<string, HTMLDivElement | null>>({});
+  const gpsPointDragSessionRef = useRef<GpsPointDragSession | null>(null);
+  const gpsPointLongPressTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (gpsPointLongPressTimerRef.current !== null) {
+        window.clearTimeout(gpsPointLongPressTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const updateClock = () => {
@@ -800,16 +836,10 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
         : current.manualPoints.map((point) =>
           point.id === savedPoint.id ? savedPoint : point
         );
-      const knownIds = [
-        ...gpxRoute.waypoints.map((point) => point.id),
-        ...manualPoints.map((point) => point.id)
-      ];
-      const knownIdSet = new Set(knownIds);
-      const orderedIds = [
-        ...current.pointOrder.filter((id) => knownIdSet.has(id)),
-        ...knownIds.filter((id) => !current.pointOrder.includes(id))
-      ];
-      const pointOrder = orderedIds.filter((id) => id !== savedPoint.id);
+      const pointOrder = getGpsPointOrder(gpxRoute.waypoints, {
+        ...current,
+        manualPoints
+      }).filter((id) => id !== savedPoint.id);
       const nextPosition = Math.min(
         Math.max(Math.round(position) || 1, 1),
         pointOrder.length + 1
@@ -824,6 +854,127 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     });
     setGpsFocusPointId(savedPoint.id);
     setGpsPointEditDraft(null);
+  }
+
+  function reorderGpsPoints(activeId: string, overId: string) {
+    if (activeId === overId) return;
+
+    setGpsPointCatalog((current) => {
+      const pointOrder = getGpsPointOrder(gpxRoute.waypoints, current);
+      const activeIndex = pointOrder.indexOf(activeId);
+      const overIndex = pointOrder.indexOf(overId);
+      if (activeIndex < 0 || overIndex < 0 || activeIndex === overIndex) return current;
+
+      const movingPoint = pointOrder[activeIndex];
+      if (!movingPoint) return current;
+      pointOrder.splice(activeIndex, 1);
+      pointOrder.splice(overIndex, 0, movingPoint);
+
+      return { ...current, pointOrder };
+    });
+  }
+
+  function clearGpsPointLongPressTimer() {
+    if (gpsPointLongPressTimerRef.current !== null) {
+      window.clearTimeout(gpsPointLongPressTimerRef.current);
+      gpsPointLongPressTimerRef.current = null;
+    }
+  }
+
+  function closestGpsPointId(clientX: number, clientY: number) {
+    let closestId: string | null = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+
+    Object.entries(gpsPointRowsRef.current).forEach(([pointId, row]) => {
+      if (!row) return;
+      const bounds = row.getBoundingClientRect();
+      const distance = Math.hypot(
+        clientX - (bounds.left + bounds.width / 2),
+        clientY - (bounds.top + bounds.height / 2)
+      );
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestId = pointId;
+      }
+    });
+
+    return closestId;
+  }
+
+  function activateGpsPointDrag(session: GpsPointDragSession, clientX: number, clientY: number) {
+    session.active = true;
+    session.overId = closestGpsPointId(clientX, clientY) ?? session.activeId;
+    setGpsPointDrag({ activeId: session.activeId, overId: session.overId });
+  }
+
+  function startGpsPointDrag(event: React.PointerEvent<HTMLButtonElement>, pointId: string) {
+    if (!ready || event.button !== 0) return;
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    clearGpsPointLongPressTimer();
+    const session: GpsPointDragSession = {
+      pointerId: event.pointerId,
+      activeId: pointId,
+      originX: event.clientX,
+      originY: event.clientY,
+      active: false,
+      overId: pointId
+    };
+    gpsPointDragSessionRef.current = session;
+    const pointerId = event.pointerId;
+
+    gpsPointLongPressTimerRef.current = window.setTimeout(() => {
+      const activeSession = gpsPointDragSessionRef.current;
+      if (!activeSession || activeSession.pointerId !== pointerId || activeSession.active) return;
+      activateGpsPointDrag(activeSession, activeSession.originX, activeSession.originY);
+      gpsPointLongPressTimerRef.current = null;
+    }, 180);
+  }
+
+  function handleGpsPointDragMove(event: React.PointerEvent<HTMLButtonElement>) {
+    const session = gpsPointDragSessionRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+
+    if (!session.active) {
+      const distance = Math.hypot(event.clientX - session.originX, event.clientY - session.originY);
+      if (distance < 8) return;
+      clearGpsPointLongPressTimer();
+      activateGpsPointDrag(session, event.clientX, event.clientY);
+      return;
+    }
+
+    const overId = closestGpsPointId(event.clientX, event.clientY) ?? session.activeId;
+    if (overId === session.overId) return;
+    session.overId = overId;
+    setGpsPointDrag({ activeId: session.activeId, overId });
+  }
+
+  function finishGpsPointDrag(event: React.PointerEvent<HTMLButtonElement>) {
+    const session = gpsPointDragSessionRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+
+    clearGpsPointLongPressTimer();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    gpsPointDragSessionRef.current = null;
+    setGpsPointDrag(null);
+    if (session.active && session.overId !== session.activeId) {
+      reorderGpsPoints(session.activeId, session.overId);
+    }
+  }
+
+  function cancelGpsPointDrag(event: React.PointerEvent<HTMLButtonElement>) {
+    const session = gpsPointDragSessionRef.current;
+    if (session && session.pointerId !== event.pointerId) return;
+
+    clearGpsPointLongPressTimer();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    gpsPointDragSessionRef.current = null;
+    setGpsPointDrag(null);
   }
 
   function exportBackup() {
@@ -842,7 +993,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `roteiro-backup-${localISODate()}.json`;
+    link.download = `roteiro-projeto-${localISODate()}.json`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -964,7 +1115,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           <button className="nav-item nav-gps" type="button" onClick={() => openGps()}>
             <Satellite size={19} />
             GPS
-            {gpxRoute.waypoints.length > 0 && <span className="nav-count">{gpxRoute.waypoints.length}</span>}
+            {gpsPoints.length > 0 && <span className="nav-count">{gpsPoints.length}</span>}
           </button>
         </nav>
 
@@ -1020,6 +1171,16 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
             <button className="secondary-button gps-launch-button" type="button" onClick={() => openGps()}>
               <Satellite size={18} />
               GPS
+            </button>
+            <button
+              className="secondary-button export-project-button"
+              type="button"
+              onClick={exportBackup}
+              aria-label="Exportar dados e configurações do projeto para um arquivo JSON"
+              title="Exportar projeto"
+            >
+              <Download size={18} />
+              Exportar
             </button>
             <button className="primary-button" type="button" onClick={openNewRoute}>
               <Plus size={19} />
@@ -1098,7 +1259,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                   <div className="gpx-points-icon"><Satellite size={16} /></div>
                   <div>
                     <strong>Pontos da rota GPS</strong>
-                    <p>{gpsPoints.length} marcadores na rota GPS</p>
+                    <p>{gpsPoints.length} marcadores · Segure ⠿ e arraste para ordenar</p>
                   </div>
                   <button type="button" onClick={() => openGps()}>
                     Ver mapa
@@ -1107,8 +1268,21 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                 <div className="gpx-points-list">
                   {gpsPoints.map((point, index) => {
                     const config = gpsPointConfigs[point.id];
+                    const isDraggingPoint = gpsPointDrag?.activeId === point.id;
+                    const isDropTarget = Boolean(
+                      gpsPointDrag &&
+                      gpsPointDrag.overId === point.id &&
+                      gpsPointDrag.activeId !== point.id
+                    );
                     return (
-                      <div className="gpx-point-row" key={point.id}>
+                      <div
+                        className={`gpx-point-row${isDraggingPoint ? " is-dragging" : ""}${isDropTarget ? " is-drop-target" : ""}`}
+                        key={point.id}
+                        data-gps-point-id={point.id}
+                        ref={(node) => {
+                          gpsPointRowsRef.current[point.id] = node;
+                        }}
+                      >
                         <button
                           className="gpx-point-open"
                           type="button"
@@ -1128,6 +1302,22 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                           <MapPin size={14} />
                         </button>
                         <div className="gpx-point-actions">
+                          <button
+                            className="gpx-point-drag-handle"
+                            type="button"
+                            disabled={!ready}
+                            aria-label={`Segure e arraste ${point.name} para mudar a posição`}
+                            title="Segure e arraste para reorganizar"
+                            onPointerDown={(event) => startGpsPointDrag(event, point.id)}
+                            onPointerMove={handleGpsPointDragMove}
+                            onPointerUp={finishGpsPointDrag}
+                            onPointerCancel={cancelGpsPointDrag}
+                            onLostPointerCapture={cancelGpsPointDrag}
+                            onClick={(event) => event.preventDefault()}
+                            onContextMenu={(event) => event.preventDefault()}
+                          >
+                            <GripVertical size={14} />
+                          </button>
                           <button
                             className="gpx-point-edit"
                             type="button"
@@ -2305,7 +2495,7 @@ function BackupModal({
               <strong>Um arquivo, toda a configuração</strong>
               <p>
                 O backup inclui pontos fixos, rotas, horários, stages, taikis,
-                almoços e configurações dos pontos GPS.
+                almoços, configurações, nomes e ordem dos pontos GPS.
               </p>
             </div>
           </div>
