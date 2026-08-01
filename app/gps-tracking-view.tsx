@@ -46,12 +46,17 @@ type EndpointMapSelection = {
   segmentIndex: number;
   side: SegmentEndpointSide;
 };
+type ManualRouteSetup = {
+  startPointId?: string;
+  endPointId?: string;
+  departureTime?: string;
+  arrivalTime?: string;
+};
 type ManualMapRoute = {
   id: string;
   name: string;
-  departure: string;
-  arrivalForecast: string;
   color?: string;
+  setup: ManualRouteSetup;
   points: GpxCoordinate[];
 };
 type RouteBoundaryMarker = {
@@ -111,6 +116,10 @@ function arrivalCopy(arrivalTime: string | undefined) {
 
 function segmentScheduleCopy(detail: RouteSegmentDetail | undefined) {
   return `${departureCopy(detail?.departureTime)}${arrivalCopy(detail?.arrivalTime)}`;
+}
+
+function manualRouteScheduleCopy(setup: ManualRouteSetup) {
+  return `${departureCopy(setup.departureTime)}${arrivalCopy(setup.arrivalTime)}`;
 }
 
 function SegmentDetailsForm({
@@ -242,6 +251,108 @@ function SegmentDetailsForm({
   );
 }
 
+function ManualRouteDetailsForm({
+  routeName,
+  setup,
+  waypoints,
+  disabled,
+  onSave
+}: {
+  routeName: string;
+  setup: ManualRouteSetup;
+  waypoints: ReadonlyArray<{ id: string; name: string }>;
+  disabled: boolean;
+  onSave: (name: string, setup: ManualRouteSetup) => void;
+}) {
+  const [name, setName] = useState(() => routeName);
+  const [startPointId, setStartPointId] = useState(() => setup.startPointId ?? "");
+  const [endPointId, setEndPointId] = useState(() => setup.endPointId ?? "");
+  const [departureTime, setDepartureTime] = useState(() => setup.departureTime ?? "");
+  const [arrivalTime, setArrivalTime] = useState(() => setup.arrivalTime ?? "");
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSave(name, {
+      startPointId: startPointId || undefined,
+      endPointId: endPointId || undefined,
+      departureTime,
+      arrivalTime
+    });
+  }
+
+  return (
+    <form className="gps-segment-details gps-manual-route-details" onSubmit={submit}>
+      <label className="gps-segment-detail-name">
+        <span>Nome da rota</span>
+        <input
+          type="text"
+          value={name}
+          placeholder="Rota manual"
+          disabled={disabled}
+          onChange={(event) => setName(event.target.value)}
+        />
+      </label>
+      <div className="gps-segment-endpoint-controls">
+        <section className="gps-segment-endpoint-group" aria-label={`Ponto de início de ${routeName}`}>
+          <label className="gps-segment-endpoint-field">
+            <span>Ponto de início</span>
+            <select
+              value={startPointId}
+              disabled={disabled}
+              onChange={(event) => setStartPointId(event.target.value)}
+            >
+              <option value="">Usar início do traçado</option>
+              {waypoints.map((point, pointIndex) => (
+                <option key={point.id} value={point.id}>
+                  {pointIndex + 1}. {point.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="gps-segment-endpoint-time">
+            <span>Horário de início</span>
+            <input
+              type="time"
+              value={departureTime}
+              disabled={disabled}
+              onChange={(event) => setDepartureTime(event.target.value)}
+            />
+          </label>
+        </section>
+        <section className="gps-segment-endpoint-group" aria-label={`Ponto de fim de ${routeName}`}>
+          <label className="gps-segment-endpoint-field">
+            <span>Ponto de fim</span>
+            <select
+              value={endPointId}
+              disabled={disabled}
+              onChange={(event) => setEndPointId(event.target.value)}
+            >
+              <option value="">Usar fim do traçado</option>
+              {waypoints.map((point, pointIndex) => (
+                <option key={point.id} value={point.id}>
+                  {pointIndex + 1}. {point.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="gps-segment-endpoint-time">
+            <span>Horário de fim</span>
+            <input
+              type="time"
+              value={arrivalTime}
+              disabled={disabled}
+              onChange={(event) => setArrivalTime(event.target.value)}
+            />
+          </label>
+        </section>
+      </div>
+      <button className="gps-save-segment-details-button" type="submit" disabled={disabled}>
+        <Save size={12} /> Salvar pontos e horários
+      </button>
+    </form>
+  );
+}
+
 export function GpsTrackingView({
   route,
   pointStepCounts,
@@ -256,7 +367,7 @@ export function GpsTrackingView({
   onSavePointPositions,
   onChangeSegmentColor,
   onChangeManualRouteColor,
-  onEditManualRoute,
+  onSaveManualRouteSetup,
   onSaveSegmentDetails,
   onAssignSegmentEndpoint,
   onCreateSegmentEndpoint,
@@ -276,7 +387,11 @@ export function GpsTrackingView({
   onSavePointPositions: (positions: Record<string, GpxCoordinate>) => void;
   onChangeSegmentColor: (segmentIndex: number, color: string) => void;
   onChangeManualRouteColor: (routeId: string, color: string) => void;
-  onEditManualRoute: (routeId: string) => void;
+  onSaveManualRouteSetup: (
+    routeId: string,
+    name: string,
+    setup: ManualRouteSetup
+  ) => void;
   onSaveSegmentDetails: (segmentIndex: number, detail: RouteSegmentDetail) => void;
   onAssignSegmentEndpoint: (
     segmentIndex: number,
@@ -760,6 +875,9 @@ export function GpsTrackingView({
       routeBoundaryMarkersRef.current = [];
       routeEndpointMarkersRef.current = [];
       manualRouteMarkersRef.current = {};
+      const routePointsById = new globalThis.Map(
+        route.waypoints.map((point) => [point.id, point])
+      );
       visibleRouteSegments.forEach((segment) => {
         const coordinates = segment.points.map(
           (point) => [point.latitude, point.longitude] as [number, number]
@@ -820,7 +938,15 @@ export function GpsTrackingView({
         if (coordinates.length < 2) return;
 
         const color = manualRoute.color ?? MANUAL_ROUTE_COLORS[index % MANUAL_ROUTE_COLORS.length];
+        const startPoint = manualRoute.setup.startPointId
+          ? routePointsById.get(manualRoute.setup.startPointId)
+          : undefined;
+        const endPoint = manualRoute.setup.endPointId
+          ? routePointsById.get(manualRoute.setup.endPointId)
+          : undefined;
         allCoordinates.push(...coordinates);
+        if (startPoint) allCoordinates.push([startPoint.latitude, startPoint.longitude]);
+        if (endPoint) allCoordinates.push([endPoint.latitude, endPoint.longitude]);
         const manualRouteLine = leaflet
           .polyline(coordinates, {
             color,
@@ -832,7 +958,7 @@ export function GpsTrackingView({
           })
           .bindTooltip(
             tooltipText(
-              `Rota manual · ${manualRoute.name}${departureCopy(manualRoute.departure)}${arrivalCopy(manualRoute.arrivalForecast)}`
+              `Rota manual · ${manualRoute.name}${manualRouteScheduleCopy(manualRoute.setup)}`
             )
           );
         if (!hiddenManualRouteIdSetRef.current.has(manualRoute.id)) {
@@ -858,8 +984,12 @@ export function GpsTrackingView({
           focusManualRoute(manualRoute.id);
         });
 
-        const start = coordinates[0];
-        const destination = coordinates.at(-1);
+        const start = startPoint
+          ? [startPoint.latitude, startPoint.longitude] as [number, number]
+          : coordinates[0];
+        const destination = endPoint
+          ? [endPoint.latitude, endPoint.longitude] as [number, number]
+          : coordinates.at(-1);
         const manualRouteMarkers: import("leaflet").Marker[] = [];
         if (start) {
           const startMarker = leaflet
@@ -867,12 +997,16 @@ export function GpsTrackingView({
               interactive: false,
               icon: leaflet.divIcon({
                 className: "gps-route-marker gps-manual-route-marker gps-manual-route-start-marker",
-                html: `<span style="--manual-route-color:${color}">Saída</span>`,
+                html: `<span style="--manual-route-color:${color}">Início</span>`,
                 iconSize: [52, 28],
                 iconAnchor: [26, 14]
               })
             })
-            .bindTooltip(tooltipText(`Rota manual · ${manualRoute.name} · saída`))
+            .bindTooltip(
+              tooltipText(
+                `Rota manual · ${manualRoute.name} · início${departureCopy(manualRoute.setup.departureTime)}${startPoint ? ` · ${startPoint.name}` : " · início do traçado"}`
+              )
+            )
           if (!hiddenManualRouteIdSetRef.current.has(manualRoute.id)) {
             startMarker.addTo(activeMap);
           }
@@ -884,12 +1018,16 @@ export function GpsTrackingView({
               interactive: false,
               icon: leaflet.divIcon({
                 className: "gps-route-marker gps-manual-route-marker gps-manual-route-destination-marker",
-                html: `<span style="--manual-route-color:${color}">Destino</span>`,
+                html: `<span style="--manual-route-color:${color}">Fim</span>`,
                 iconSize: [58, 28],
                 iconAnchor: [29, 14]
               })
             })
-            .bindTooltip(tooltipText(`Rota manual · ${manualRoute.name} · destino`))
+            .bindTooltip(
+              tooltipText(
+                `Rota manual · ${manualRoute.name} · fim${arrivalCopy(manualRoute.setup.arrivalTime)}${endPoint ? ` · ${endPoint.name}` : " · fim do traçado"}`
+              )
+            )
           if (!hiddenManualRouteIdSetRef.current.has(manualRoute.id)) {
             destinationMarker.addTo(activeMap);
           }
@@ -1368,7 +1506,7 @@ export function GpsTrackingView({
             )}
             {selectedManualRoute && !endpointMapSelection && (
               <span className="gps-route-focus-hint" role="status">
-                {selectedManualRoute.name} · Saída às {selectedManualRoute.departure} · Chegada às {selectedManualRoute.arrivalForecast} em primeiro plano.
+                {selectedManualRoute.name}{manualRouteScheduleCopy(selectedManualRoute.setup) || " · horários ainda não definidos"} em primeiro plano.
               </span>
             )}
             <div className="gps-map-edit-controls">
@@ -1407,7 +1545,7 @@ export function GpsTrackingView({
                     disabled={manualRouteDraft.length < 2}
                     onClick={saveManualRouteDrawing}
                   >
-                    <Save size={14} /> Configurar rota
+                    <Save size={14} /> Salvar rota
                   </button>
                 </>
               ) : isEditingPoints ? (
@@ -1535,7 +1673,7 @@ export function GpsTrackingView({
               </div>
               <p>
                 Use o olho para exibir ou ocultar. Nos trechos GPX, defina início e fim; nas rotas
-                desenhadas, o nome e os horários vêm do planejamento salvo.
+                desenhadas, escolha os pontos de início e fim e seus horários.
               </p>
               <ol>
                 {visibleRouteSegments.map((segment) => {
@@ -1606,6 +1744,7 @@ export function GpsTrackingView({
                   const color = manualRoute.color ?? MANUAL_ROUTE_COLORS[index % MANUAL_ROUTE_COLORS.length];
                   const isRouteVisible = !hiddenManualRouteIdSet.has(manualRoute.id);
                   const isRouteSelected = selectedManualRouteId === manualRoute.id;
+                  const setup = manualRoute.setup;
 
                   return (
                     <li
@@ -1635,15 +1774,18 @@ export function GpsTrackingView({
                         </button>
                       </div>
                       <span className="gps-segment-recording-time">
-                        Saída: {manualRoute.departure} → Chegada: {manualRoute.arrivalForecast}
+                        Início: {setup.departureTime || "não definido"} → Fim: {setup.arrivalTime || "não definido"}
                       </span>
-                      <button
-                        className="gps-edit-manual-route-button"
-                        type="button"
-                        onClick={() => onEditManualRoute(manualRoute.id)}
-                      >
-                        <Pencil size={12} /> Configurar rota
-                      </button>
+                      <ManualRouteDetailsForm
+                        key={`${manualRoute.id}:${manualRoute.name}:${setup.startPointId ?? ""}:${setup.endPointId ?? ""}:${setup.departureTime ?? ""}:${setup.arrivalTime ?? ""}`}
+                        routeName={manualRoute.name}
+                        setup={setup}
+                        waypoints={route.waypoints}
+                        disabled={isEditingPoints || isDrawingManualRoute}
+                        onSave={(name, nextSetup) =>
+                          onSaveManualRouteSetup(manualRoute.id, name, nextSetup)
+                        }
+                      />
                     </li>
                   );
                 })}

@@ -74,6 +74,14 @@ type TruckRoute = {
   stops: RouteStop[];
   manualPath?: GpxCoordinate[];
   manualPathColor?: string;
+  manualSetup?: ManualRouteSetup;
+};
+
+type ManualRouteSetup = {
+  startPointId?: string;
+  endPointId?: string;
+  departureTime?: string;
+  arrivalTime?: string;
 };
 
 type RouteStatus = "active" | "waiting" | "done";
@@ -129,7 +137,7 @@ const STORAGE_KEY = "roteiro-truck-routes-v1";
 const FIXED_POINTS_KEY = "roteiro-truck-fixed-points-v1";
 const GPS_POINT_CONFIGS_KEY = "roteiro-truck-gps-point-configs-v1";
 const GPS_POINTS_KEY = "roteiro-truck-gps-points-v1";
-const BACKUP_VERSION = 10;
+const BACKUP_VERSION = 11;
 const EMPTY_GPS_POINT_CATALOG: GpsPointCatalog = {
   pointOrder: [],
   removedPointIds: [],
@@ -218,6 +226,17 @@ function isValidManualPath(value: unknown): value is GpxCoordinate[] {
   return Array.isArray(value) && value.length >= 2 && value.every(isValidGpsCoordinate);
 }
 
+function isValidManualRouteSetup(value: unknown): value is ManualRouteSetup {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const setup = value as Partial<ManualRouteSetup>;
+  return (
+    (setup.startPointId === undefined || typeof setup.startPointId === "string") &&
+    (setup.endPointId === undefined || typeof setup.endPointId === "string") &&
+    (setup.departureTime === undefined || typeof setup.departureTime === "string") &&
+    (setup.arrivalTime === undefined || typeof setup.arrivalTime === "string")
+  );
+}
+
 function isValidRoute(value: unknown): value is TruckRoute {
   if (!value || typeof value !== "object") return false;
   const route = value as Partial<TruckRoute>;
@@ -232,6 +251,7 @@ function isValidRoute(value: unknown): value is TruckRoute {
         typeof route.fuelStop.locationUrl === "string")) &&
     (route.manualPath === undefined || isValidManualPath(route.manualPath)) &&
     (route.manualPathColor === undefined || isRouteSegmentColor(route.manualPathColor)) &&
+    (route.manualSetup === undefined || isValidManualRouteSetup(route.manualSetup)) &&
     Array.isArray(route.stops) &&
     route.stops.every(isValidStop)
   );
@@ -247,6 +267,7 @@ function migrateRoute(value: unknown): TruckRoute | null {
     departurePointUrl?: unknown;
     arrivalPointUrl?: unknown;
     manualPath?: unknown;
+    manualSetup?: unknown;
   };
   if (
     typeof legacy.id !== "string" ||
@@ -276,6 +297,9 @@ function migrateRoute(value: unknown): TruckRoute | null {
       : undefined,
     manualPathColor: isRouteSegmentColor(legacy.manualPathColor)
       ? legacy.manualPathColor
+      : undefined,
+    manualSetup: isValidManualRouteSetup(legacy.manualSetup)
+      ? { ...legacy.manualSetup }
       : undefined
   };
 }
@@ -876,21 +900,30 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
 
   const manualRoutesForMap = useMemo(
     () =>
-      routes.flatMap((route) =>
-        isValidManualPath(route.manualPath)
-          ? [{
-            id: route.id,
-            name: route.name,
-            departure: route.departure,
-            arrivalForecast: route.arrivalForecast,
-            color: route.manualPathColor,
-            points: route.manualPath.map((point) => ({
-              latitude: point.latitude,
-              longitude: point.longitude
-            }))
-          }]
-          : []
-      ),
+      routes.flatMap((route) => {
+        if (!isValidManualPath(route.manualPath)) return [];
+
+        const savedSetup = route.manualSetup;
+        return [{
+          id: route.id,
+          name: route.name,
+          color: route.manualPathColor,
+          setup: savedSetup
+            ? { ...savedSetup }
+            : {
+              departureTime: isRouteSegmentDepartureTime(route.departure)
+                ? route.departure
+                : "",
+              arrivalTime: isRouteSegmentDepartureTime(route.arrivalForecast)
+                ? route.arrivalForecast
+                : ""
+            },
+          points: route.manualPath.map((point) => ({
+            latitude: point.latitude,
+            longitude: point.longitude
+          }))
+        }];
+      }),
     [routes]
   );
 
@@ -904,20 +937,31 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     setModalOpen(true);
   }
 
-  function openManualRouteConfig(routeId: string) {
-    const route = routes.find((item) => item.id === routeId);
-    if (route && isValidManualPath(route.manualPath)) openEditRoute(route);
-  }
-
   function createManualRouteFromMap(points: GpxCoordinate[]) {
     const manualPath = points
       .filter(isValidGpsCoordinate)
       .map((point) => ({ latitude: point.latitude, longitude: point.longitude }));
     if (manualPath.length < 2) return;
 
-    setDraft({ ...emptyRoute(), stops: [], manualPath });
+    const routeId = cryptoId();
+    setRoutes((current) => {
+      const manualRouteNumber =
+        current.filter((route) => isValidManualPath(route.manualPath)).length + 1;
+      return [
+        ...current,
+        {
+          id: routeId,
+          name: `Rota manual ${manualRouteNumber}`,
+          departure: "07:00",
+          arrivalForecast: "08:00",
+          stops: [],
+          manualPath,
+          manualSetup: { departureTime: "", arrivalTime: "" }
+        }
+      ];
+    });
+    setSelectedId(routeId);
     setGpsFocusPointId(null);
-    setModalOpen(true);
   }
 
   function saveRoute(event: React.FormEvent) {
@@ -941,6 +985,9 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
         : undefined,
       manualPathColor: isRouteSegmentColor(draft.manualPathColor)
         ? draft.manualPathColor
+        : undefined,
+      manualSetup: isValidManualRouteSetup(draft.manualSetup)
+        ? { ...draft.manualSetup }
         : undefined,
       stops: draft.stops
         .map((stop) => ({
@@ -1176,6 +1223,22 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       delete remainingConfigs[point.id];
       return remainingConfigs;
     });
+    setRoutes((current) =>
+      current.map((route) => {
+        if (!route.manualSetup || !isValidManualPath(route.manualPath)) return route;
+        if (
+          route.manualSetup.startPointId !== point.id &&
+          route.manualSetup.endPointId !== point.id
+        ) {
+          return route;
+        }
+
+        const manualSetup = { ...route.manualSetup };
+        if (manualSetup.startPointId === point.id) delete manualSetup.startPointId;
+        if (manualSetup.endPointId === point.id) delete manualSetup.endPointId;
+        return { ...route, manualSetup };
+      })
+    );
     setGpsFocusPointId((current) => (current === point.id ? null : current));
     setGpsPointEditDraft((current) => (current?.point.id === point.id ? null : current));
   }
@@ -1216,6 +1279,38 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       current.map((route) =>
         route.id === routeId && isValidManualPath(route.manualPath)
           ? { ...route, manualPathColor: color }
+          : route
+      )
+    );
+  }
+
+  function saveManualRouteSetup(routeId: string, name: string, setup: ManualRouteSetup) {
+    const knownPointIds = new Set(gpsPoints.map((point) => point.id));
+    const startPointId =
+      setup.startPointId && knownPointIds.has(setup.startPointId)
+        ? setup.startPointId
+        : undefined;
+    const endPointId =
+      setup.endPointId && knownPointIds.has(setup.endPointId)
+        ? setup.endPointId
+        : undefined;
+    const departureTime = isRouteSegmentDepartureTime(setup.departureTime)
+      ? setup.departureTime
+      : "";
+    const arrivalTime = isRouteSegmentDepartureTime(setup.arrivalTime)
+      ? setup.arrivalTime
+      : "";
+
+    setRoutes((current) =>
+      current.map((route) =>
+        route.id === routeId && isValidManualPath(route.manualPath)
+          ? {
+            ...route,
+            name: name.trim() || route.name,
+            departure: departureTime || route.departure,
+            arrivalForecast: arrivalTime || route.arrivalForecast,
+            manualSetup: { startPointId, endPointId, departureTime, arrivalTime }
+          }
           : route
       )
     );
@@ -1607,7 +1702,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           onSavePointPositions={saveGpsPointPositions}
           onChangeSegmentColor={saveGpsSegmentColor}
           onChangeManualRouteColor={saveManualRouteColor}
-          onEditManualRoute={openManualRouteConfig}
+          onSaveManualRouteSetup={saveManualRouteSetup}
           onSaveSegmentDetails={saveGpsSegmentDetails}
           onAssignSegmentEndpoint={saveGpsSegmentEndpoint}
           onCreateSegmentEndpoint={addGpsSegmentEndpointFromMap}
@@ -1617,17 +1712,6 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
             setGpsFocusPointId(null);
           }}
         />
-        {modalOpen && draft && (
-          <RouteModal
-            draft={draft}
-            setDraft={setDraft}
-            onClose={() => {
-              setModalOpen(false);
-              setDraft(null);
-            }}
-            onSave={saveRoute}
-          />
-        )}
         {gpsPointDraft && (
           <GpsPointConfigModal
             point={gpsPointDraft.point}
@@ -1886,6 +1970,10 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                 fixedPoints={fixedPoints}
                 nowMinutes={nowMinutes}
                 onEdit={() => openEditRoute(selectedRoute)}
+                onOpenGps={() => {
+                  setViewMode("gps");
+                  setGpsFocusPointId(null);
+                }}
                 onAddFuel={() => addFuelStop(selectedRoute)}
                 onDelete={() => deleteRoute(selectedRoute)}
               />
@@ -1959,6 +2047,7 @@ function RouteDetail({
   fixedPoints,
   nowMinutes,
   onEdit,
+  onOpenGps,
   onAddFuel,
   onDelete
 }: {
@@ -1966,9 +2055,51 @@ function RouteDetail({
   fixedPoints: FixedPoints;
   nowMinutes: number;
   onEdit: () => void;
+  onOpenGps: () => void;
   onAddFuel: () => void;
   onDelete: () => void;
 }) {
+  if (isValidManualPath(route.manualPath)) {
+    const setup = route.manualSetup;
+
+    return (
+      <div className="detail-content manual-route-detail">
+        <div className="detail-heading">
+          <div>
+            <span className="eyebrow">TRAÇADO MANUAL</span>
+            <h2>{route.name}</h2>
+            <p className="manual-route-detail-note">
+              <RouteIcon size={14} /> {route.manualPath.length} pontos desenhados no mapa GPS
+            </p>
+          </div>
+          <div className="icon-actions">
+            <button className="danger" type="button" aria-label="Excluir rota" onClick={onDelete}>
+              <Trash2 size={17} />
+            </button>
+          </div>
+        </div>
+
+        <div className="detail-metrics route-metrics-two">
+          <div>
+            <span><Clock3 size={15} /> Horário de início</span>
+            <strong>{setup?.departureTime || "Não definido"}</strong>
+          </div>
+          <div>
+            <span><Clock3 size={15} /> Horário de fim</span>
+            <strong>{setup?.arrivalTime || "Não definido"}</strong>
+          </div>
+        </div>
+
+        <div className="manual-route-detail-action">
+          <p>Escolha os pontos de início e fim e seus horários no modo GPS.</p>
+          <button className="primary-button" type="button" onClick={onOpenGps}>
+            <Satellite size={17} /> Abrir GPS
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const status = getStatus(route, nowMinutes);
   const progress = getProgress(route, nowMinutes);
   const orderedStops = [...route.stops].sort(
@@ -1984,11 +2115,6 @@ function RouteDetail({
             {statusCopy[status].label}
           </span>
           <h2>{route.name}</h2>
-          {isValidManualPath(route.manualPath) && (
-            <p className="manual-route-detail-note">
-              <RouteIcon size={14} /> Traçado manual com {route.manualPath.length} pontos no mapa GPS
-            </p>
-          )}
           {fixedPoints.arrivalPointUrl ? (
             <a
               className="location-link"
@@ -2985,7 +3111,7 @@ function BackupModal({
               <strong>Um arquivo, toda a configuração</strong>
               <p>
                 O backup inclui pontos fixos, rotas, horários, stages, taikis,
-                almoços, configurações, nomes, posições, cores e inícios/fins dos trechos GPS.
+                almoços, configurações, nomes, posições, cores e inícios/fins dos trechos e rotas manuais no GPS.
               </p>
             </div>
           </div>

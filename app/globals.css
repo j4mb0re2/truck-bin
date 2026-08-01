@@ -1215,6 +1215,25 @@ button {
   font-size: 13px;
 }
 
+.manual-route-detail-action {
+  margin-top: 22px;
+  padding: 16px;
+  background: #f3faf8;
+  border: 1px solid #cce5dd;
+  border-radius: 11px;
+}
+
+.manual-route-detail-action p {
+  margin: 0 0 12px;
+  color: #42635d;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.manual-route-detail-action .primary-button {
+  width: 100%;
+}
+
 .overall-progress {
   padding: 12px 14px;
   background: #f8f9f9;
@@ -2967,35 +2986,6 @@ button {
 
 .gps-segment-recording-time {
   margin-left: 36px;
-}
-
-.gps-edit-manual-route-button {
-  width: calc(100% - 36px);
-  min-height: 27px;
-  margin: 8px 0 0 36px;
-  padding: 5px 7px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  color: #17645a;
-  background: #eef8f4;
-  border: 1px solid #b8dfd3;
-  border-radius: 7px;
-  cursor: pointer;
-  font-size: 8px;
-  font-weight: 750;
-}
-
-.gps-edit-manual-route-button:hover {
-  color: #fff;
-  background: #0f766e;
-  border-color: #0f766e;
-}
-
-.gps-edit-manual-route-button:focus-visible {
-  outline: 2px solid #82bed1;
-  outline-offset: 2px;
 }
 
 .gps-segment-endpoint-controls {
