@@ -399,6 +399,10 @@ export function GpsTrackingView({
   segmentEndpoints,
   manualRoutes,
   initialWaypointId,
+  autoStartNavigation,
+  navigationMode,
+  activeRouteName,
+  onExitNavigation,
   onAddPoint,
   onEditPoint,
   onSavePointPositions,
@@ -421,6 +425,10 @@ export function GpsTrackingView({
   segmentEndpoints: RouteSegmentEndpoints;
   manualRoutes: ManualMapRoute[];
   initialWaypointId: string | null;
+  autoStartNavigation?: boolean;
+  navigationMode?: boolean;
+  activeRouteName?: string;
+  onExitNavigation?: () => void;
   onAddPoint: (coordinate: GpxCoordinate) => void;
   onEditPoint: (pointId: string) => void;
   onSavePointPositions: (positions: Record<string, GpxCoordinate>) => void;
@@ -880,6 +888,15 @@ export function GpsTrackingView({
       }
     );
   }, [updateTruckMarker]);
+
+  useEffect(() => {
+    if (mapReady && (autoStartNavigation || navigationMode) && gpsState === "idle") {
+      const timerId = window.setTimeout(() => {
+        startTracking();
+      }, 0);
+      return () => window.clearTimeout(timerId);
+    }
+  }, [mapReady, autoStartNavigation, navigationMode, gpsState, startTracking]);
 
   useEffect(() => {
     let disposed = false;
@@ -1612,6 +1629,41 @@ export function GpsTrackingView({
           </button>
         </div>
       </header>
+
+      {navigationMode && (
+        <div className="gps-navigation-banner">
+          <div className="gps-nav-badge">
+            <Navigation size={16} className="gps-nav-icon-spin" />
+            <span>MODO NAVEGAÇÃO AO VIVO</span>
+          </div>
+          <div className="gps-nav-info">
+            <strong>Seguindo: {activeRouteName || "Primeira Rota"}</strong>
+            <span>{gpsState === "tracking" ? "Sua localização está sendo atualizada no mapa em tempo real" : gpsMessage}</span>
+          </div>
+          <div className="gps-nav-actions">
+            {livePosition && (
+              <button
+                className="secondary-button gps-nav-recenter"
+                type="button"
+                onClick={() => {
+                  if (mapRef.current && livePosition) {
+                    mapRef.current.flyTo([livePosition.latitude, livePosition.longitude], 16);
+                  }
+                }}
+              >
+                <Crosshair size={15} /> Centralizar caminhão
+              </button>
+            )}
+            <button
+              className="secondary-button gps-nav-exit"
+              type="button"
+              onClick={onExitNavigation || onBack}
+            >
+              <X size={15} /> Sair da navegação
+            </button>
+          </div>
+        </div>
+      )}
 
       <section className="gps-layout">
         {pointsPanel}

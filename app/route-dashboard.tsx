@@ -17,6 +17,7 @@ import {
   MapPin,
   Menu,
   MoreHorizontal,
+  Navigation,
   Pencil,
   Plus,
   Route as RouteIcon,
@@ -790,6 +791,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
   const [backupOpen, setBackupOpen] = useState(false);
   const [backupMessage, setBackupMessage] = useState<BackupMessage | null>(null);
   const [viewMode, setViewMode] = useState<"routes" | "gps">("routes");
+  const [navigationMode, setNavigationMode] = useState(false);
   const [gpsFocusPointId, setGpsFocusPointId] = useState<string | null>(null);
   const [gpsPointConfigs, setGpsPointConfigs] = useState<GpsPointConfigs>({});
   const [gpsPointDraft, setGpsPointDraft] = useState<GpsPointDraft | null>(null);
@@ -1058,8 +1060,20 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
   }
 
   function openGps(pointId: string | null = null) {
+    setNavigationMode(false);
     setGpsFocusPointId(pointId);
     setViewMode("gps");
+    setMobileMenu(false);
+  }
+
+  function startNavigationMode(routeId?: string) {
+    const targetId = routeId || selectedId || routes[0]?.id || "";
+    if (targetId) {
+      setSelectedId(targetId);
+    }
+    setNavigationMode(true);
+    setViewMode("gps");
+    setGpsFocusPointId(null);
     setMobileMenu(false);
   }
 
@@ -1842,6 +1856,13 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           segmentEndpoints={gpsPointCatalog.segmentEndpoints}
           manualRoutes={manualRoutesForMap}
           initialWaypointId={gpsFocusPointId}
+          navigationMode={navigationMode}
+          autoStartNavigation={navigationMode}
+          activeRouteName={selectedRoute?.name || routes[0]?.name}
+          onExitNavigation={() => {
+            setNavigationMode(false);
+            setViewMode("routes");
+          }}
           onAddPoint={addGpsPointFromMap}
           onEditPoint={openGpsPointEditorById}
           onSavePointPositions={saveGpsPointPositions}
@@ -1855,6 +1876,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           onCreateManualRouteEndpoint={addGpsManualRouteEndpointFromMap}
           onCreateManualRoute={createManualRouteFromMap}
           onBack={() => {
+            setNavigationMode(false);
             setViewMode("routes");
             setGpsFocusPointId(null);
           }}
@@ -1898,10 +1920,14 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
         </button>
 
         <nav className="main-nav" aria-label="Navegação principal">
-          <button className="nav-item active" type="button">
+          <button className={`nav-item ${!navigationMode ? "active" : ""}`} type="button" onClick={() => { setNavigationMode(false); setViewMode("routes"); setMobileMenu(false); }}>
             <Map size={19} />
             Minhas rotas
             <span className="nav-count">{routes.length}</span>
+          </button>
+          <button className={`nav-item nav-gps ${navigationMode ? "active" : ""}`} type="button" onClick={() => startNavigationMode()}>
+            <Navigation size={19} />
+            Modo Navegação
           </button>
           <button className="nav-item nav-gps" type="button" onClick={() => openGps()}>
             <Satellite size={19} />
@@ -1959,6 +1985,15 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
             </div>
           </div>
           <div className="header-actions">
+            <button
+              className="primary-button navigation-mode-button"
+              type="button"
+              onClick={() => startNavigationMode()}
+              title="Iniciar modo de navegação com GPS ao vivo"
+            >
+              <Navigation size={18} />
+              Modo Navegação
+            </button>
             <button className="secondary-button gps-launch-button" type="button" onClick={() => openGps()}>
               <Satellite size={18} />
               GPS
@@ -2121,6 +2156,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                   setViewMode("gps");
                   setGpsFocusPointId(null);
                 }}
+                onStartNavigation={() => startNavigationMode(selectedRoute.id)}
                 onAddFuel={() => addFuelStop(selectedRoute)}
                 onDelete={() => deleteRoute(selectedRoute)}
               />
@@ -2195,6 +2231,7 @@ function RouteDetail({
   nowMinutes,
   onEdit,
   onOpenGps,
+  onStartNavigation,
   onAddFuel,
   onDelete
 }: {
@@ -2203,6 +2240,7 @@ function RouteDetail({
   nowMinutes: number;
   onEdit: () => void;
   onOpenGps: () => void;
+  onStartNavigation: () => void;
   onAddFuel: () => void;
   onDelete: () => void;
 }) {
@@ -2238,10 +2276,15 @@ function RouteDetail({
         </div>
 
         <div className="manual-route-detail-action">
-          <p>Escolha os pontos de início e fim e seus horários no modo GPS.</p>
-          <button className="primary-button" type="button" onClick={onOpenGps}>
-            <Satellite size={17} /> Abrir GPS
-          </button>
+          <p>Inicie o acompanhamento por GPS ao vivo ou configure horários.</p>
+          <div style={{ display: "flex", gap: "8px", width: "100%" }}>
+            <button className="primary-button navigation-mode-button" style={{ flex: 1 }} type="button" onClick={onStartNavigation}>
+              <Navigation size={17} /> Navegar
+            </button>
+            <button className="secondary-button" style={{ flex: 1 }} type="button" onClick={onOpenGps}>
+              <Satellite size={17} /> Abrir GPS
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -2295,6 +2338,15 @@ function RouteDetail({
           <strong>{route.arrivalForecast}</strong>
         </div>
       </div>
+
+      <button
+        className="primary-button navigation-mode-button"
+        style={{ width: "100%", marginTop: "14px", padding: "11px 16px", borderRadius: "10px" }}
+        type="button"
+        onClick={onStartNavigation}
+      >
+        <Navigation size={18} /> Iniciar Modo Navegação GPS
+      </button>
 
       <div className="journey-header">
         <h3>Itinerário da rota</h3>
