@@ -99,12 +99,12 @@ function isSameCoordinate(first: GpxCoordinate, second: GpxCoordinate) {
 
 function gpsErrorMessage(error: GeolocationPositionError) {
   if (error.code === error.PERMISSION_DENIED) {
-    return "Permita o acesso à localização para acompanhar o caminhão.";
+    return "Acesso à localização bloqueado. No iPhone: Ajustes > Privacidade e Segurança > Serviços de Localização > Safari > Durante o Uso do App.";
   }
   if (error.code === error.POSITION_UNAVAILABLE) {
-    return "A posição não está disponível neste momento.";
+    return "Sinal de GPS indisponível no dispositivo. Verifique se o GPS do iPhone está ativado e tente em local aberto.";
   }
-  return "O GPS demorou para responder. Tente novamente em um local aberto.";
+  return "O GPS demorou a responder. Toque em 'Ativar GPS' para tentar novamente.";
 }
 
 function tooltipText(content: string) {
@@ -850,41 +850,91 @@ export function GpsTrackingView({
   );
 
   const startTracking = useCallback(() => {
-    if (!navigator.geolocation) {
+    if (typeof window === "undefined" || !navigator.geolocation) {
       setGpsState("error");
       setGpsMessage("Este navegador não oferece suporte a GPS.");
       return;
     }
 
-    if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+
     setGpsState("searching");
     setGpsMessage("Procurando o sinal GPS do dispositivo…");
-    watchIdRef.current = navigator.geolocation.watchPosition(
+
+    const handleSuccess = (position: GeolocationPosition) => {
+      const nextLivePosition = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+        updatedAt: new Date(position.timestamp).toLocaleTimeString("pt-BR", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit"
+        })
+      };
+      livePositionRef.current = nextLivePosition;
+      updateTruckMarker(nextLivePosition);
+      setLivePosition(nextLivePosition);
+      setGpsState("tracking");
+      setGpsMessage("Acompanhando o caminhão ao vivo.");
+    };
+
+    const startWatch = (highAccuracy: boolean) => {
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        handleSuccess,
+        (error) => {
+          if (highAccuracy && (error.code === error.TIMEOUT || error.code === error.POSITION_UNAVAILABLE)) {
+            if (watchIdRef.current !== null) {
+              navigator.geolocation.clearWatch(watchIdRef.current);
+              watchIdRef.current = null;
+            }
+            startWatch(false);
+            return;
+          }
+          setGpsState("error");
+          setGpsMessage(gpsErrorMessage(error));
+        },
+        {
+          enableHighAccuracy: highAccuracy,
+          maximumAge: 5_000,
+          timeout: highAccuracy ? 10_000 : 20_000
+        }
+      );
+    };
+
+    navigator.geolocation.getCurrentPosition(
       (position) => {
-        const nextLivePosition = {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-          updatedAt: new Date(position.timestamp).toLocaleTimeString("pt-BR", {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit"
-          })
-        };
-        livePositionRef.current = nextLivePosition;
-        updateTruckMarker(nextLivePosition);
-        setLivePosition(nextLivePosition);
-        setGpsState("tracking");
-        setGpsMessage("Acompanhando o caminhão ao vivo.");
+        handleSuccess(position);
+        startWatch(true);
       },
       (error) => {
-        setGpsState("error");
-        setGpsMessage(gpsErrorMessage(error));
+        if (error.code === error.TIMEOUT || error.code === error.POSITION_UNAVAILABLE) {
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              handleSuccess(position);
+              startWatch(false);
+            },
+            () => {
+              startWatch(false);
+            },
+            {
+              enableHighAccuracy: false,
+              maximumAge: 10_000,
+              timeout: 15_000
+            }
+          );
+        } else {
+          setGpsState("error");
+          setGpsMessage(gpsErrorMessage(error));
+        }
       },
       {
         enableHighAccuracy: true,
-        maximumAge: 3_000,
-        timeout: 20_000
+        maximumAge: 5_000,
+        timeout: 8_000
       }
     );
   }, [updateTruckMarker]);
