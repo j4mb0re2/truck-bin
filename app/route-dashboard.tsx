@@ -73,6 +73,7 @@ type TruckRoute = {
   arrivalForecast: string;
   fuelStop?: FuelStop;
   stops: RouteStop[];
+  manualPath?: GpxCoordinate[];
 };
 
 type RouteStatus = "active" | "waiting" | "done";
@@ -122,7 +123,7 @@ const STORAGE_KEY = "roteiro-truck-routes-v1";
 const FIXED_POINTS_KEY = "roteiro-truck-fixed-points-v1";
 const GPS_POINT_CONFIGS_KEY = "roteiro-truck-gps-point-configs-v1";
 const GPS_POINTS_KEY = "roteiro-truck-gps-points-v1";
-const BACKUP_VERSION = 6;
+const BACKUP_VERSION = 7;
 const EMPTY_GPS_POINT_CATALOG: GpsPointCatalog = {
   pointOrder: [],
   pointNames: {},
@@ -205,6 +206,10 @@ function isValidStop(value: unknown): value is RouteStop {
   );
 }
 
+function isValidManualPath(value: unknown): value is GpxCoordinate[] {
+  return Array.isArray(value) && value.length >= 2 && value.every(isValidGpsCoordinate);
+}
+
 function isValidRoute(value: unknown): value is TruckRoute {
   if (!value || typeof value !== "object") return false;
   const route = value as Partial<TruckRoute>;
@@ -217,6 +222,7 @@ function isValidRoute(value: unknown): value is TruckRoute {
       (typeof route.fuelStop === "object" &&
         route.fuelStop !== null &&
         typeof route.fuelStop.locationUrl === "string")) &&
+    (route.manualPath === undefined || isValidManualPath(route.manualPath)) &&
     Array.isArray(route.stops) &&
     route.stops.every(isValidStop)
   );
@@ -231,6 +237,7 @@ function migrateRoute(value: unknown): TruckRoute | null {
     locationUrl?: unknown;
     departurePointUrl?: unknown;
     arrivalPointUrl?: unknown;
+    manualPath?: unknown;
   };
   if (
     typeof legacy.id !== "string" ||
@@ -251,7 +258,13 @@ function migrateRoute(value: unknown): TruckRoute | null {
         ? legacy.arrivalForecast
         : legacy.departure,
     fuelStop: legacy.fuelStop,
-    stops: legacy.stops
+    stops: legacy.stops,
+    manualPath: isValidManualPath(legacy.manualPath)
+      ? legacy.manualPath.map((point) => ({
+        latitude: point.latitude,
+        longitude: point.longitude
+      }))
+      : undefined
   };
 }
 
@@ -807,6 +820,23 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     [gpxRoute, gpsPoints]
   );
 
+  const manualRoutesForMap = useMemo(
+    () =>
+      routes.flatMap((route) =>
+        isValidManualPath(route.manualPath)
+          ? [{
+            id: route.id,
+            name: route.name,
+            points: route.manualPath.map((point) => ({
+              latitude: point.latitude,
+              longitude: point.longitude
+            }))
+          }]
+          : []
+      ),
+    [routes]
+  );
+
   function openNewRoute() {
     setDraft(emptyRoute());
     setModalOpen(true);
@@ -814,6 +844,18 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
 
   function openEditRoute(route: TruckRoute) {
     setDraft(JSON.parse(JSON.stringify(route)));
+    setModalOpen(true);
+  }
+
+  function createManualRouteFromMap(points: GpxCoordinate[]) {
+    const manualPath = points
+      .filter(isValidGpsCoordinate)
+      .map((point) => ({ latitude: point.latitude, longitude: point.longitude }));
+    if (manualPath.length < 2) return;
+
+    setDraft({ ...emptyRoute(), manualPath });
+    setGpsFocusPointId(null);
+    setViewMode("routes");
     setModalOpen(true);
   }
 
@@ -829,6 +871,12 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       name: draft.name.trim(),
       fuelStop: draft.fuelStop
         ? { locationUrl: draft.fuelStop.locationUrl.trim() }
+        : undefined,
+      manualPath: isValidManualPath(draft.manualPath)
+        ? draft.manualPath.map((point) => ({
+          latitude: point.latitude,
+          longitude: point.longitude
+        }))
         : undefined,
       stops: draft.stops
         .map((stop) => ({
@@ -1283,6 +1331,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           pointSegmentIndexes={gpsPointSegmentIndexes}
           segmentColors={gpsPointCatalog.segmentColors}
           segmentEndpoints={gpsPointCatalog.segmentEndpoints}
+          manualRoutes={manualRoutesForMap}
           initialWaypointId={gpsFocusPointId}
           onAddPoint={addGpsPointFromMap}
           onEditPoint={openGpsPointEditorById}
@@ -1290,6 +1339,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           onChangeSegmentColor={saveGpsSegmentColor}
           onAssignSegmentEndpoint={saveGpsSegmentEndpoint}
           onCreateSegmentEndpoint={addGpsSegmentEndpointFromMap}
+          onCreateManualRoute={createManualRouteFromMap}
           onBack={() => {
             setViewMode("routes");
             setGpsFocusPointId(null);
@@ -1610,6 +1660,9 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                           {firstStage?.stageNumber && (
                             <em>Stage {firstStage.stageNumber}</em>
                           )}
+                          {isValidManualPath(route.manualPath) && (
+                            <em>Traçado manual</em>
+                          )}
                         </span>
                         <span className="progress-row">
                           <span className="progress-track">
@@ -1744,6 +1797,11 @@ function RouteDetail({
             {statusCopy[status].label}
           </span>
           <h2>{route.name}</h2>
+          {isValidManualPath(route.manualPath) && (
+            <p className="manual-route-detail-note">
+              <RouteIcon size={14} /> Traçado manual com {route.manualPath.length} pontos no mapa GPS
+            </p>
+          )}
           {fixedPoints.arrivalPointUrl ? (
             <a
               className="location-link"
@@ -1990,6 +2048,17 @@ function RouteModal({
 
         <form onSubmit={onSave}>
           <div className="modal-scroll">
+            {isValidManualPath(draft.manualPath) && (
+              <div className="manual-route-ready">
+                <RouteIcon size={18} />
+                <div>
+                  <strong>Traçado manual pronto</strong>
+                  <p>
+                    {draft.manualPath.length} pontos desenhados no mapa serão vinculados a esta rota.
+                  </p>
+                </div>
+              </div>
+            )}
             <div className="form-section">
               <div className="form-section-title">
                 <span>1</span>

@@ -12,6 +12,7 @@ import {
   Satellite,
   Save,
   TriangleAlert,
+  Undo2,
   X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -39,6 +40,13 @@ type EndpointMapSelection = {
   segmentIndex: number;
   side: SegmentEndpointSide;
 };
+type ManualMapRoute = {
+  id: string;
+  name: string;
+  points: GpxCoordinate[];
+};
+
+const MANUAL_ROUTE_COLORS = ["#0f766e", "#b7791f", "#5b5bd6", "#b45363"] as const;
 type LeafletApi = typeof import("leaflet");
 
 function formatWaypointTime(time: string, description: string) {
@@ -86,6 +94,7 @@ export function GpsTrackingView({
   pointSegmentIndexes,
   segmentColors,
   segmentEndpoints,
+  manualRoutes,
   initialWaypointId,
   onAddPoint,
   onEditPoint,
@@ -93,6 +102,7 @@ export function GpsTrackingView({
   onChangeSegmentColor,
   onAssignSegmentEndpoint,
   onCreateSegmentEndpoint,
+  onCreateManualRoute,
   onBack
 }: {
   route: GpxRouteData;
@@ -100,6 +110,7 @@ export function GpsTrackingView({
   pointSegmentIndexes: Record<string, number>;
   segmentColors: RouteSegmentColors;
   segmentEndpoints: RouteSegmentEndpoints;
+  manualRoutes: ManualMapRoute[];
   initialWaypointId: string | null;
   onAddPoint: (coordinate: GpxCoordinate) => void;
   onEditPoint: (pointId: string) => void;
@@ -115,6 +126,7 @@ export function GpsTrackingView({
     side: SegmentEndpointSide,
     coordinate: GpxCoordinate
   ) => void;
+  onCreateManualRoute: (points: GpxCoordinate[]) => void;
   onBack: () => void;
 }) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -131,10 +143,15 @@ export function GpsTrackingView({
   const onCreateSegmentEndpointRef = useRef(onCreateSegmentEndpoint);
   const addPointModeRef = useRef(false);
   const isEditingPointsRef = useRef(false);
+  const isDrawingManualRouteRef = useRef(false);
   const endpointMapSelectionRef = useRef<EndpointMapSelection | null>(null);
   const routeLineClickRef = useRef(false);
   const routeLinesRef = useRef<Record<number, import("leaflet").Polyline>>({});
   const routeEndpointMarkersRef = useRef<import("leaflet").Marker[]>([]);
+  const manualRouteDraftRef = useRef<GpxCoordinate[]>([]);
+  const manualRouteDraftLineRef = useRef<import("leaflet").Polyline | null>(null);
+  const manualRoutePreviewLineRef = useRef<import("leaflet").Polyline | null>(null);
+  const manualRouteDraftPointLayersRef = useRef<import("leaflet").Layer[]>([]);
   const waypointMarkersRef = useRef<Record<string, import("leaflet").Marker>>({});
   const pointPositionEditsRef = useRef<Record<string, GpxCoordinate>>({});
   const originalPointPositionsRef = useRef<Record<string, GpxCoordinate>>({});
@@ -147,6 +164,8 @@ export function GpsTrackingView({
   const [pendingPointPositionCount, setPendingPointPositionCount] = useState(0);
   const [endpointMapSelection, setEndpointMapSelection] = useState<EndpointMapSelection | null>(null);
   const [selectedRouteSegmentIndex, setSelectedRouteSegmentIndex] = useState<number | null>(null);
+  const [isDrawingManualRoute, setIsDrawingManualRoute] = useState(false);
+  const [manualRouteDraft, setManualRouteDraft] = useState<GpxCoordinate[]>([]);
 
   useEffect(() => {
     onAddPointRef.current = onAddPoint;
@@ -172,7 +191,11 @@ export function GpsTrackingView({
     () => getRenderedRouteSegments(route.segments, route.segmentTimings),
     [route.segmentTimings, route.segments]
   );
-  const hasRoute = visibleRouteSegments.length > 0;
+  const manualRoutePointCount = useMemo(
+    () => manualRoutes.reduce((total, manualRoute) => total + manualRoute.points.length, 0),
+    [manualRoutes]
+  );
+  const hasRoute = visibleRouteSegments.length > 0 || manualRoutes.length > 0;
   const initialWaypoint = route.waypoints.find((point) => point.id === initialWaypointId);
 
   const centerRoute = useCallback(() => {
@@ -193,7 +216,13 @@ export function GpsTrackingView({
   }, []);
 
   const toggleAddPointMode = useCallback(() => {
-    if (isEditingPointsRef.current || endpointMapSelectionRef.current) return;
+    if (
+      isEditingPointsRef.current ||
+      endpointMapSelectionRef.current ||
+      isDrawingManualRouteRef.current
+    ) {
+      return;
+    }
 
     setIsAddingPoint((currentMode) => {
       const nextMode = !currentMode;
@@ -211,9 +240,61 @@ export function GpsTrackingView({
     setSelectedRouteSegmentIndex(segmentIndex);
   }, []);
 
+  const addManualRouteDraftPoint = useCallback((coordinate: GpxCoordinate) => {
+    const currentPoints = manualRouteDraftRef.current;
+    const lastPoint = currentPoints.at(-1);
+    if (lastPoint && isSameCoordinate(lastPoint, coordinate)) return;
+
+    const nextPoints = [
+      ...currentPoints,
+      { latitude: coordinate.latitude, longitude: coordinate.longitude }
+    ];
+    manualRouteDraftRef.current = nextPoints;
+    setManualRouteDraft(nextPoints);
+  }, []);
+
+  const startManualRouteDrawing = useCallback(() => {
+    if (!mapReady || isEditingPointsRef.current) return;
+
+    addPointModeRef.current = false;
+    setIsAddingPoint(false);
+    endpointMapSelectionRef.current = null;
+    setEndpointMapSelection(null);
+    focusRouteSegment(null);
+    manualRouteDraftRef.current = [];
+    setManualRouteDraft([]);
+    isDrawingManualRouteRef.current = true;
+    setIsDrawingManualRoute(true);
+  }, [focusRouteSegment, mapReady]);
+
+  const cancelManualRouteDrawing = useCallback(() => {
+    isDrawingManualRouteRef.current = false;
+    setIsDrawingManualRoute(false);
+    manualRouteDraftRef.current = [];
+    setManualRouteDraft([]);
+  }, []);
+
+  const undoManualRouteDraftPoint = useCallback(() => {
+    const nextPoints = manualRouteDraftRef.current.slice(0, -1);
+    manualRouteDraftRef.current = nextPoints;
+    setManualRouteDraft(nextPoints);
+  }, []);
+
+  const saveManualRouteDrawing = useCallback(() => {
+    const points = manualRouteDraftRef.current;
+    if (points.length < 2) return;
+
+    const savedPoints = points.map((point) => ({
+      latitude: point.latitude,
+      longitude: point.longitude
+    }));
+    cancelManualRouteDrawing();
+    onCreateManualRoute(savedPoints);
+  }, [cancelManualRouteDrawing, onCreateManualRoute]);
+
   const selectSegmentEndpointOnMap = useCallback(
     (segmentIndex: number, side: SegmentEndpointSide) => {
-      if (!mapReady || isEditingPointsRef.current) return;
+      if (!mapReady || isEditingPointsRef.current || isDrawingManualRouteRef.current) return;
 
       addPointModeRef.current = false;
       setIsAddingPoint(false);
@@ -233,7 +314,7 @@ export function GpsTrackingView({
   }, []);
 
   const startPointEditing = useCallback(() => {
-    if (!mapReady) return;
+    if (!mapReady || isDrawingManualRouteRef.current) return;
 
     addPointModeRef.current = false;
     setIsAddingPoint(false);
@@ -366,6 +447,7 @@ export function GpsTrackingView({
     let disposed = false;
     let map: import("leaflet").Map | null = null;
     let onMapClick: ((event: import("leaflet").LeafletMouseEvent) => void) | null = null;
+    let onMapMouseMove: ((event: import("leaflet").LeafletMouseEvent) => void) | null = null;
 
     async function createMap() {
       const leaflet = await import("leaflet");
@@ -387,6 +469,14 @@ export function GpsTrackingView({
         .addTo(activeMap);
 
       onMapClick = (event) => {
+        if (isDrawingManualRouteRef.current) {
+          addManualRouteDraftPoint({
+            latitude: event.latlng.lat,
+            longitude: event.latlng.lng
+          });
+          return;
+        }
+
         if (!addPointModeRef.current) {
           if (routeLineClickRef.current) {
             routeLineClickRef.current = false;
@@ -408,7 +498,22 @@ export function GpsTrackingView({
       };
       activeMap.on("click", onMapClick);
 
+      onMapMouseMove = (event) => {
+        if (!isDrawingManualRouteRef.current) return;
+
+        const lastPoint = manualRouteDraftRef.current.at(-1);
+        const previewLine = manualRoutePreviewLineRef.current;
+        if (!lastPoint || !previewLine) return;
+
+        previewLine.setLatLngs([
+          [lastPoint.latitude, lastPoint.longitude],
+          [event.latlng.lat, event.latlng.lng]
+        ]);
+      };
+      activeMap.on("mousemove", onMapMouseMove);
+
       const allCoordinates: [number, number][] = [];
+      const gpxCoordinates: [number, number][] = [];
       waypointMarkersRef.current = {};
       routeLinesRef.current = {};
       routeEndpointMarkersRef.current = [];
@@ -418,6 +523,7 @@ export function GpsTrackingView({
         );
         const color = routeSegmentColor(segment.index, segmentColors);
         allCoordinates.push(...coordinates);
+        gpxCoordinates.push(...coordinates);
         const routeLine = leaflet
           .polyline(coordinates, {
             color,
@@ -430,6 +536,15 @@ export function GpsTrackingView({
         routeLinesRef.current[segment.index] = routeLine;
 
         routeLine.on("click", (event) => {
+          if (isDrawingManualRouteRef.current) {
+            leaflet.DomEvent.stopPropagation(event.originalEvent);
+            addManualRouteDraftPoint({
+              latitude: event.latlng.lat,
+              longitude: event.latlng.lng
+            });
+            return;
+          }
+
           routeLineClickRef.current = true;
           window.setTimeout(() => {
             routeLineClickRef.current = false;
@@ -450,13 +565,67 @@ export function GpsTrackingView({
         });
       });
 
+      manualRoutes.forEach((manualRoute, index) => {
+        const coordinates = manualRoute.points.map(
+          (point) => [point.latitude, point.longitude] as [number, number]
+        );
+        if (coordinates.length < 2) return;
+
+        const color = MANUAL_ROUTE_COLORS[index % MANUAL_ROUTE_COLORS.length];
+        allCoordinates.push(...coordinates);
+        leaflet
+          .polyline(coordinates, {
+            color,
+            weight: 4,
+            opacity: 0.95,
+            dashArray: "10 8",
+            lineCap: "round",
+            lineJoin: "round",
+            interactive: false
+          })
+          .bindTooltip(tooltipText(`Rota manual · ${manualRoute.name}`))
+          .addTo(activeMap);
+
+        const start = coordinates[0];
+        const destination = coordinates.at(-1);
+        if (start) {
+          leaflet
+            .marker(start, {
+              interactive: false,
+              icon: leaflet.divIcon({
+                className: "gps-route-marker gps-manual-route-marker gps-manual-route-start-marker",
+                html: `<span style="--manual-route-color:${color}">Saída</span>`,
+                iconSize: [52, 28],
+                iconAnchor: [26, 14]
+              })
+            })
+            .bindTooltip(tooltipText(`Rota manual · ${manualRoute.name} · saída`))
+            .addTo(activeMap);
+        }
+        if (destination) {
+          leaflet
+            .marker(destination, {
+              interactive: false,
+              icon: leaflet.divIcon({
+                className: "gps-route-marker gps-manual-route-marker gps-manual-route-destination-marker",
+                html: `<span style="--manual-route-color:${color}">Destino</span>`,
+                iconSize: [58, 28],
+                iconAnchor: [29, 14]
+              })
+            })
+            .bindTooltip(tooltipText(`Rota manual · ${manualRoute.name} · destino`))
+            .addTo(activeMap);
+        }
+      });
+
       const firstSegment = visibleRouteSegments.at(0);
       const lastSegment = visibleRouteSegments.at(-1);
-      const firstPoint = allCoordinates.at(0);
-      const lastPoint = allCoordinates.at(-1);
+      const firstPoint = gpxCoordinates.at(0);
+      const lastPoint = gpxCoordinates.at(-1);
       if (firstPoint) {
         leaflet
           .marker(firstPoint, {
+            interactive: false,
             icon: leaflet.divIcon({
               className: "gps-route-marker gps-start-marker has-route-segment",
               html: `<span style="--route-point-color:${routeSegmentColor(firstSegment?.index ?? 0, segmentColors)}">Início</span>`,
@@ -470,6 +639,7 @@ export function GpsTrackingView({
       if (lastPoint) {
         leaflet
           .marker(lastPoint, {
+            interactive: false,
             icon: leaflet.divIcon({
               className: "gps-route-marker gps-end-marker has-route-segment",
               html: `<span style="--route-point-color:${routeSegmentColor(lastSegment?.index ?? 0, segmentColors)}">Fim</span>`,
@@ -532,6 +702,13 @@ export function GpsTrackingView({
 
         waypointMarker.on("click", (event) => {
           leaflet.DomEvent.stopPropagation(event.originalEvent);
+          if (isDrawingManualRouteRef.current) {
+            addManualRouteDraftPoint({
+              latitude: point.latitude,
+              longitude: point.longitude
+            });
+            return;
+          }
           if (isEditingPointsRef.current) return;
           if (addPointModeRef.current) {
             addPointModeRef.current = false;
@@ -562,10 +739,14 @@ export function GpsTrackingView({
     return () => {
       disposed = true;
       if (map && onMapClick) map.off("click", onMapClick);
+      if (map && onMapMouseMove) map.off("mousemove", onMapMouseMove);
       map?.remove();
       waypointMarkersRef.current = {};
       routeLinesRef.current = {};
       routeEndpointMarkersRef.current = [];
+      manualRouteDraftLineRef.current = null;
+      manualRoutePreviewLineRef.current = null;
+      manualRouteDraftPointLayersRef.current = [];
       if (mapRef.current === map) {
         mapRef.current = null;
         truckMarkerRef.current = null;
@@ -578,6 +759,8 @@ export function GpsTrackingView({
   }, [
     initialWaypoint,
     initialWaypointId,
+    addManualRouteDraftPoint,
+    manualRoutes,
     pointSegmentIndexes,
     pointStepCounts,
     route,
@@ -587,6 +770,95 @@ export function GpsTrackingView({
     updateTruckMarker,
     visibleRouteSegments
   ]);
+
+  useEffect(() => {
+    const leaflet = leafletRef.current;
+    const map = mapRef.current;
+    if (!leaflet || !map || !mapReady) return;
+
+    manualRouteDraftLineRef.current?.remove();
+    manualRoutePreviewLineRef.current?.remove();
+    manualRouteDraftPointLayersRef.current.forEach((layer) => layer.remove());
+    manualRouteDraftLineRef.current = null;
+    manualRoutePreviewLineRef.current = null;
+    manualRouteDraftPointLayersRef.current = [];
+
+    if (!isDrawingManualRoute || !manualRouteDraft.length) return;
+
+    const coordinates = manualRouteDraft.map(
+      (point) => [point.latitude, point.longitude] as [number, number]
+    );
+    let draftLine: import("leaflet").Polyline | null = null;
+    if (coordinates.length > 1) {
+      draftLine = leaflet
+        .polyline(coordinates, {
+          color: MANUAL_ROUTE_COLORS[0],
+          weight: 4,
+          opacity: 0.95,
+          dashArray: "8 9",
+          lineCap: "round",
+          lineJoin: "round",
+          interactive: false
+        })
+        .addTo(map);
+      manualRouteDraftLineRef.current = draftLine;
+    }
+
+    const lastPoint = coordinates.at(-1);
+    let previewLine: import("leaflet").Polyline | null = null;
+    if (lastPoint) {
+      previewLine = leaflet
+        .polyline([lastPoint, lastPoint], {
+          color: MANUAL_ROUTE_COLORS[0],
+          weight: 3,
+          opacity: 0.72,
+          dashArray: "4 8",
+          lineCap: "round",
+          interactive: false
+        })
+        .addTo(map);
+      manualRoutePreviewLineRef.current = previewLine;
+    }
+
+    const draftPointLayers = manualRouteDraft.map((point, index) => {
+      const isStart = index === 0;
+      const isDestination = index === manualRouteDraft.length - 1;
+      const layer = leaflet
+        .circleMarker([point.latitude, point.longitude], {
+          radius: isStart || isDestination ? 6 : 4,
+          color: MANUAL_ROUTE_COLORS[0],
+          weight: 2,
+          fillColor: "#ffffff",
+          fillOpacity: 1,
+          interactive: false
+        })
+        .bindTooltip(
+          isStart
+            ? "Saída da rota manual"
+            : isDestination
+              ? "Destino atual da rota manual"
+              : `Ponto ${index + 1} do traçado`
+        )
+        .addTo(map);
+      return layer;
+    });
+    manualRouteDraftPointLayersRef.current = draftPointLayers;
+
+    return () => {
+      draftLine?.remove();
+      previewLine?.remove();
+      draftPointLayers.forEach((layer) => layer.remove());
+      if (manualRouteDraftLineRef.current === draftLine) {
+        manualRouteDraftLineRef.current = null;
+      }
+      if (manualRoutePreviewLineRef.current === previewLine) {
+        manualRoutePreviewLineRef.current = null;
+      }
+      if (manualRouteDraftPointLayersRef.current === draftPointLayers) {
+        manualRouteDraftPointLayersRef.current = [];
+      }
+    };
+  }, [isDrawingManualRoute, manualRouteDraft, mapReady]);
 
   useEffect(() => {
     const leaflet = leafletRef.current;
@@ -662,18 +934,35 @@ export function GpsTrackingView({
           <div>
             <span className="eyebrow">MODO GPS</span>
             <h1>Localização do caminhão</h1>
-            <p>Rota carregada do arquivo <strong>rota.gpx</strong></p>
+            <p>
+              {visibleRouteSegments.length ? (
+                <>Rota carregada do arquivo <strong>rota.gpx</strong></>
+              ) : manualRoutes.length ? (
+                "Rota manual salva neste navegador"
+              ) : (
+                "Desenhe uma rota manual ou carregue um arquivo GPX"
+              )}
+            </p>
           </div>
         </div>
         <div className="gps-header-actions">
           <button
             className={`secondary-button gps-add-point-button ${isAddingPoint ? "is-active" : ""}`}
             type="button"
-            disabled={!mapReady || isEditingPoints || Boolean(endpointMapSelection)}
+            disabled={!mapReady || isEditingPoints || Boolean(endpointMapSelection) || isDrawingManualRoute}
             aria-pressed={isAddingPoint}
             onClick={toggleAddPointMode}
           >
             <Plus size={17} /> {isAddingPoint ? "Cancelar ponto" : "Adicionar ponto"}
+          </button>
+          <button
+            className={`secondary-button gps-manual-route-button ${isDrawingManualRoute ? "is-active" : ""}`}
+            type="button"
+            disabled={!mapReady || isEditingPoints || Boolean(endpointMapSelection)}
+            aria-pressed={isDrawingManualRoute}
+            onClick={isDrawingManualRoute ? cancelManualRouteDrawing : startManualRouteDrawing}
+          >
+            <Route size={17} /> {isDrawingManualRoute ? "Cancelar traçado" : "Traçar rota"}
           </button>
           <button className="secondary-button gps-center-button" type="button" onClick={centerRoute}>
             <Crosshair size={17} /> Centralizar rota
@@ -693,10 +982,17 @@ export function GpsTrackingView({
       <section className="gps-layout">
         <div className="gps-map-panel panel">
           <div className="gps-map-toolbar">
-            <span className="gps-map-label"><Route size={15} /> Rota estabelecida</span>
+            <span className="gps-map-label">
+              <Route size={15} /> {isDrawingManualRoute ? "Traçando rota manual" : "Rota estabelecida"}
+            </span>
             {isAddingPoint && (
               <span className="gps-add-point-hint" role="status">
                 Clique no mapa para adicionar o ponto.
+              </span>
+            )}
+            {isDrawingManualRoute && (
+              <span className="gps-manual-route-hint" role="status">
+                Clique na saída, nos pontos do caminho e no destino. A linha segue a ordem dos cliques.
               </span>
             )}
             {isEditingPoints && (
@@ -724,7 +1020,33 @@ export function GpsTrackingView({
                   <X size={14} /> Mostrar todos
                 </button>
               )}
-              {isEditingPoints ? (
+              {isDrawingManualRoute ? (
+                <>
+                  <button
+                    className="gps-undo-manual-route-button"
+                    type="button"
+                    disabled={!manualRouteDraft.length}
+                    onClick={undoManualRouteDraftPoint}
+                  >
+                    <Undo2 size={14} /> Desfazer
+                  </button>
+                  <button
+                    className="gps-cancel-manual-route-button"
+                    type="button"
+                    onClick={cancelManualRouteDrawing}
+                  >
+                    <X size={14} /> Cancelar
+                  </button>
+                  <button
+                    className="gps-save-manual-route-button"
+                    type="button"
+                    disabled={manualRouteDraft.length < 2}
+                    onClick={saveManualRouteDrawing}
+                  >
+                    <Save size={14} /> Configurar rota
+                  </button>
+                </>
+              ) : isEditingPoints ? (
                 <>
                   <button className="gps-cancel-points-button" type="button" onClick={cancelPointEditing}>
                     <X size={14} /> Cancelar
@@ -757,17 +1079,23 @@ export function GpsTrackingView({
                 </button>
               )}
             </div>
-            <span className="gps-map-points">{route.totalTrackPoints.toLocaleString("pt-BR")} pontos GPX</span>
+            <span className="gps-map-points">
+              {isDrawingManualRoute
+                ? `${manualRouteDraft.length} ${manualRouteDraft.length === 1 ? "ponto" : "pontos"} no traçado`
+                : visibleRouteSegments.length
+                  ? `${route.totalTrackPoints.toLocaleString("pt-BR")} pontos GPX${manualRoutePointCount ? ` + ${manualRoutePointCount} manuais` : ""}`
+                  : `${manualRoutePointCount.toLocaleString("pt-BR")} pontos manuais`}
+            </span>
           </div>
           <div
-            className={`gps-map${isAddingPoint ? " is-adding-point" : ""}${isEditingPoints ? " is-editing-points" : ""}${endpointMapSelection ? " is-selecting-segment-endpoint" : ""}${selectedRouteSegmentIndex !== null ? " is-focusing-route-segment" : ""}`}
+            className={`gps-map${isAddingPoint ? " is-adding-point" : ""}${isDrawingManualRoute ? " is-drawing-manual-route" : ""}${isEditingPoints ? " is-editing-points" : ""}${endpointMapSelection ? " is-selecting-segment-endpoint" : ""}${selectedRouteSegmentIndex !== null ? " is-focusing-route-segment" : ""}`}
             ref={mapContainerRef}
             aria-label="Mapa da rota GPS"
           />
-          {!hasRoute && (
+          {!hasRoute && !isDrawingManualRoute && (
             <div className="gps-map-empty">
               <TriangleAlert size={20} />
-              <span>Não foi possível encontrar uma trilha no arquivo rota.gpx.</span>
+              <span>Não há uma trilha carregada. Use <strong>Traçar rota</strong> para desenhar o caminho manualmente.</span>
             </div>
           )}
           <div className={`gps-live-status gps-${gpsState}`}>
@@ -815,11 +1143,18 @@ export function GpsTrackingView({
           <div className="gps-route-summary">
             <div>
               <span>Trajeto exibido</span>
-              <strong>{route.renderedTrackPoints.toLocaleString("pt-BR")} pontos otimizados</strong>
+              <strong>
+                {visibleRouteSegments.length
+                  ? `${route.renderedTrackPoints.toLocaleString("pt-BR")} pontos GPX${manualRoutePointCount ? ` + ${manualRoutePointCount} manuais` : ""}`
+                  : `${manualRoutePointCount.toLocaleString("pt-BR")} pontos manuais`}
+              </strong>
             </div>
             <div>
               <span>Marcadores da rota</span>
-              <strong>{route.waypoints.length} pontos em Minhas rotas</strong>
+              <strong>
+                {route.waypoints.length} pontos
+                {manualRoutes.length ? ` + ${manualRoutes.length} ${manualRoutes.length === 1 ? "rota manual" : "rotas manuais"}` : ""}
+              </strong>
             </div>
           </div>
 

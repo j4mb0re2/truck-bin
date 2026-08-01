@@ -1113,6 +1113,10 @@ button {
   font-size: 10px;
 }
 
+.detail-heading .manual-route-detail-note {
+  color: #0f766e;
+}
+
 .location-link {
   margin-top: 7px;
   display: inline-flex;
@@ -1613,6 +1617,39 @@ button {
   max-height: calc(100vh - 225px);
   padding: 22px 26px 6px;
   overflow: auto;
+}
+
+.manual-route-ready {
+  margin: 0 0 20px;
+  padding: 11px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: #0d685a;
+  background: #effaf6;
+  border: 1px solid #c6e6dc;
+  border-radius: 10px;
+}
+
+.manual-route-ready > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.manual-route-ready strong,
+.manual-route-ready p {
+  display: block;
+}
+
+.manual-route-ready strong {
+  font-size: 10px;
+}
+
+.manual-route-ready p {
+  margin: 3px 0 0;
+  color: #528276;
+  font-size: 9px;
+  line-height: 1.4;
 }
 
 .form-section {
@@ -2167,6 +2204,12 @@ button {
   border-color: var(--blue);
 }
 
+.gps-manual-route-button.is-active {
+  color: #fff;
+  background: #0f766e;
+  border-color: #0f766e;
+}
+
 .gps-track-button.is-tracking {
   background: #2f8669;
   box-shadow: 0 7px 17px rgba(47, 134, 105, 0.2);
@@ -2220,7 +2263,10 @@ button {
 .gps-edit-points-button,
 .gps-cancel-points-button,
 .gps-save-points-button,
-.gps-clear-route-focus-button {
+.gps-clear-route-focus-button,
+.gps-undo-manual-route-button,
+.gps-cancel-manual-route-button,
+.gps-save-manual-route-button {
   min-height: 30px;
   padding: 6px 8px;
   border: 1px solid #cddde3;
@@ -2240,19 +2286,29 @@ button {
 
 .gps-edit-points-button:hover,
 .gps-cancel-points-button:hover,
-.gps-clear-route-focus-button:hover {
+.gps-clear-route-focus-button:hover,
+.gps-undo-manual-route-button:hover,
+.gps-cancel-manual-route-button:hover {
   color: var(--blue);
   background: #f6fbfd;
   border-color: #a9cddd;
 }
 
-.gps-save-points-button {
+.gps-save-points-button,
+.gps-save-manual-route-button {
   color: #fff;
   background: var(--blue);
   border-color: var(--blue);
 }
 
-.gps-save-points-button:disabled {
+.gps-save-manual-route-button {
+  background: #0f766e;
+  border-color: #0f766e;
+}
+
+.gps-save-points-button:disabled,
+.gps-save-manual-route-button:disabled,
+.gps-undo-manual-route-button:disabled {
   cursor: default;
   opacity: 0.58;
 }
@@ -2284,7 +2340,8 @@ button {
 .gps-add-point-hint,
 .gps-edit-points-hint,
 .gps-endpoint-selection-hint,
-.gps-route-focus-hint {
+.gps-route-focus-hint,
+.gps-manual-route-hint {
   padding: 7px 9px;
   color: #245d86;
   background: rgba(238, 247, 251, 0.96);
@@ -2313,6 +2370,12 @@ button {
   border-color: #a9d3e0;
 }
 
+.gps-manual-route-hint {
+  color: #0d685a;
+  background: rgba(239, 250, 246, 0.97);
+  border-color: #b8dfd3;
+}
+
 .gps-map.is-adding-point,
 .gps-map.is-adding-point .leaflet-container,
 .gps-map.is-adding-point .leaflet-interactive {
@@ -2325,7 +2388,13 @@ button {
   cursor: crosshair !important;
 }
 
-.gps-map:not(.is-adding-point):not(.is-editing-points):not(.is-selecting-segment-endpoint) .leaflet-overlay-pane {
+.gps-map.is-drawing-manual-route,
+.gps-map.is-drawing-manual-route .leaflet-container,
+.gps-map.is-drawing-manual-route .leaflet-interactive {
+  cursor: crosshair !important;
+}
+
+.gps-map:not(.is-adding-point):not(.is-drawing-manual-route):not(.is-editing-points):not(.is-selecting-segment-endpoint) .leaflet-overlay-pane {
   cursor: pointer;
 }
 
@@ -2740,6 +2809,16 @@ button {
 
 .gps-end-marker > span {
   background: var(--orange);
+}
+
+.gps-manual-route-marker > span {
+  min-width: 44px;
+  text-align: center;
+  background: var(--manual-route-color);
+}
+
+.gps-manual-route-destination-marker > span {
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.14), 0 3px 9px rgba(24, 35, 38, 0.2);
 }
 
 .gps-route-marker.has-route-segment > span,
@@ -3210,8 +3289,9 @@ button {
     font-size: 11px;
   }
 
-  .gps-add-point-button {
-    flex-basis: 100% !important;
+  .gps-add-point-button,
+  .gps-manual-route-button {
+    flex-basis: calc(50% - 5px) !important;
   }
 
   .gps-map-panel,
@@ -3228,13 +3308,16 @@ button {
   .gps-add-point-hint,
   .gps-edit-points-hint,
   .gps-endpoint-selection-hint,
-  .gps-route-focus-hint {
+  .gps-route-focus-hint,
+  .gps-manual-route-hint {
     order: 3;
     flex: 1 1 100%;
   }
 
   .gps-map-edit-controls {
     margin-left: auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   .gps-map-points {
