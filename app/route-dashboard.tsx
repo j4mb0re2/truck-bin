@@ -277,7 +277,8 @@ function getManualRouteSetup(route: TruckRoute): ManualRouteSetup {
       (isRouteSegmentDepartureTime(route.departure) ? route.departure : ""),
     arrivalTime:
       savedSetup?.arrivalTime ??
-      (isRouteSegmentDepartureTime(route.arrivalForecast) ? route.arrivalForecast : "")
+      (isRouteSegmentDepartureTime(route.arrivalForecast) ? route.arrivalForecast : ""),
+    procedure: savedSetup?.procedure
   };
 }
 
