@@ -2239,6 +2239,19 @@ button {
   background: #e7eef0;
 }
 
+@media (min-width: 901px) {
+  .gps-map-panel {
+    position: sticky;
+    top: 18px;
+    min-height: 0;
+    height: min(620px, calc(100dvh - 36px));
+  }
+
+  .gps-map {
+    height: 100%;
+  }
+}
+
 .gps-map-toolbar {
   position: absolute;
   z-index: 500;
