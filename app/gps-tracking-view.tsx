@@ -271,12 +271,20 @@ function SegmentDetailsForm({
       </div>
       <div className="gps-segment-procedure-bar">
         {detail?.procedure && (
-          <div className="gps-procedure-badge">
-            <span className="proc-icon">{PROCEDURE_CONFIG[detail.procedure.procedureType].icon}</span>
-            <span>
+          <div className="gps-procedure-badge" style={{ flexDirection: "column", alignItems: "flex-start", gap: "2px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span className="proc-icon">{PROCEDURE_CONFIG[detail.procedure.procedureType].icon}</span>
               <strong>{PROCEDURE_CONFIG[detail.procedure.procedureType].label}</strong>
-              <small>({detail.procedure.endpointSide === "start" ? "Início da rota" : "Fim da rota"})</small>
-            </span>
+              <small>({detail.procedure.endpointSide === "start" ? "Início" : "Fim"})</small>
+              {(detail.procedure.startTime || detail.procedure.endTime) && (
+                <span className="proc-time-tag">
+                  ⏰ {detail.procedure.startTime || "--:--"} → {detail.procedure.endTime || "--:--"}
+                </span>
+              )}
+            </div>
+            {detail.procedure.notes && (
+              <p className="proc-notes-text">📝 {detail.procedure.notes}</p>
+            )}
           </div>
         )}
         <div style={{ display: "flex", gap: "6px" }}>
@@ -427,12 +435,20 @@ function ManualRouteDetailsForm({
       </div>
       <div className="gps-segment-procedure-bar">
         {setup?.procedure && (
-          <div className="gps-procedure-badge">
-            <span className="proc-icon">{PROCEDURE_CONFIG[setup.procedure.procedureType].icon}</span>
-            <span>
+          <div className="gps-procedure-badge" style={{ flexDirection: "column", alignItems: "flex-start", gap: "2px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span className="proc-icon">{PROCEDURE_CONFIG[setup.procedure.procedureType].icon}</span>
               <strong>{PROCEDURE_CONFIG[setup.procedure.procedureType].label}</strong>
-              <small>({setup.procedure.endpointSide === "start" ? "Início da rota" : "Fim da rota"})</small>
-            </span>
+              <small>({setup.procedure.endpointSide === "start" ? "Início" : "Fim"})</small>
+              {(setup.procedure.startTime || setup.procedure.endTime) && (
+                <span className="proc-time-tag">
+                  ⏰ {setup.procedure.startTime || "--:--"} → {setup.procedure.endTime || "--:--"}
+                </span>
+              )}
+            </div>
+            {setup.procedure.notes && (
+              <p className="proc-notes-text">📝 {setup.procedure.notes}</p>
+            )}
           </div>
         )}
         <div style={{ display: "flex", gap: "6px" }}>
@@ -2339,6 +2355,9 @@ export function SegmentProcedureModal({
   const [procedureType, setProcedureType] = useState<RouteProcedureType>(
     currentProcedure?.procedureType ?? "carga"
   );
+  const [startTime, setStartTime] = useState(currentProcedure?.startTime ?? "");
+  const [endTime, setEndTime] = useState(currentProcedure?.endTime ?? "");
+  const [notes, setNotes] = useState(currentProcedure?.notes ?? "");
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
@@ -2399,6 +2418,54 @@ export function SegmentProcedureModal({
               })}
             </div>
           </div>
+
+          {/* Horários do procedimento */}
+          <div className="form-group" style={{ marginTop: "18px" }}>
+            <label className="form-label" style={{ fontWeight: 600, display: "block", marginBottom: "8px" }}>
+              Horário do procedimento
+            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              <label className="gps-segment-endpoint-time">
+                <span>Início do procedimento</span>
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                />
+              </label>
+              <label className="gps-segment-endpoint-time">
+                <span>Fim do procedimento</span>
+                <input
+                  type="time"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                />
+              </label>
+            </div>
+          </div>
+
+          {/* Observação */}
+          <div className="form-group" style={{ marginTop: "18px" }}>
+            <label className="form-label" style={{ fontWeight: 600, display: "block", marginBottom: "8px" }}>
+              Observação
+            </label>
+            <textarea
+              className="procedure-notes-input"
+              value={notes}
+              placeholder="Escreva alguma observação sobre este procedimento..."
+              rows={2}
+              onChange={(e) => setNotes(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                borderRadius: "8px",
+                border: "1px solid #cbd5e1",
+                fontSize: "13px",
+                fontFamily: "inherit",
+                resize: "vertical"
+              }}
+            />
+          </div>
         </div>
 
         <div className="modal-actions" style={{ padding: "12px 20px 16px", display: "flex", gap: "8px", justifyContent: "flex-end" }}>
@@ -2418,7 +2485,15 @@ export function SegmentProcedureModal({
           <button
             type="button"
             className="primary-button"
-            onClick={() => onSave({ endpointSide: side, procedureType })}
+            onClick={() =>
+              onSave({
+                endpointSide: side,
+                procedureType,
+                startTime: startTime.trim() || undefined,
+                endTime: endTime.trim() || undefined,
+                notes: notes.trim() || undefined
+              })
+            }
           >
             💾 Salvar Procedimento
           </button>

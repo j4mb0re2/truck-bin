@@ -2155,6 +2155,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                             {item.procedure && (
                               <em style={{ color: "#0369a1", backgroundColor: "#e0f2fe", fontStyle: "normal", fontWeight: 700 }}>
                                 {PROCEDURE_CONFIG[item.procedure.procedureType].icon} {PROCEDURE_CONFIG[item.procedure.procedureType].label} ({item.procedure.endpointSide === "start" ? "Início" : "Fim"})
+                                {(item.procedure.startTime || item.procedure.endTime) && ` ⏰ ${item.procedure.startTime || ""}-${item.procedure.endTime || ""}`}
                               </em>
                             )}
                           </span>
@@ -2197,6 +2198,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                           {item.procedure && (
                             <em style={{ color: "#0369a1", backgroundColor: "#e0f2fe", fontStyle: "normal", fontWeight: 700 }}>
                               {PROCEDURE_CONFIG[item.procedure.procedureType].icon} {PROCEDURE_CONFIG[item.procedure.procedureType].label} ({item.procedure.endpointSide === "start" ? "Início" : "Fim"})
+                              {(item.procedure.startTime || item.procedure.endTime) && ` ⏰ ${item.procedure.startTime || ""}-${item.procedure.endTime || ""}`}
                             </em>
                           )}
                         </span>

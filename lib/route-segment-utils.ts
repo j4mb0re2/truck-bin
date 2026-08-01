@@ -30,6 +30,9 @@ export type RouteProcedureType =
 export type RouteSegmentProcedure = {
   endpointSide: "start" | "end";
   procedureType: RouteProcedureType;
+  startTime?: string;
+  endTime?: string;
+  notes?: string;
 };
 
 export const PROCEDURE_CONFIG: Record<
