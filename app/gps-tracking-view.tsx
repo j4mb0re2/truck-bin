@@ -302,6 +302,7 @@ export function GpsTrackingView({
   const routeLineClickRef = useRef(false);
   const routeLinesRef = useRef<Record<number, import("leaflet").Polyline>>({});
   const routeBoundaryMarkersRef = useRef<RouteBoundaryMarker[]>([]);
+  const hiddenRouteSegmentIndexSetRef = useRef<ReadonlySet<number>>(new Set());
   const routeEndpointMarkersRef = useRef<import("leaflet").Marker[]>([]);
   const manualRouteDraftRef = useRef<GpxCoordinate[]>([]);
   const manualRouteDraftLineRef = useRef<import("leaflet").Polyline | null>(null);
@@ -360,6 +361,10 @@ export function GpsTrackingView({
     () => new Set(hiddenRouteSegmentIndexes),
     [hiddenRouteSegmentIndexes]
   );
+
+  useEffect(() => {
+    hiddenRouteSegmentIndexSetRef.current = hiddenRouteSegmentIndexSet;
+  }, [hiddenRouteSegmentIndexSet]);
   const manualRoutePointCount = useMemo(
     () => manualRoutes.reduce((total, manualRoute) => total + manualRoute.points.length, 0),
     [manualRoutes]
@@ -725,8 +730,10 @@ export function GpsTrackingView({
             lineCap: "round",
             lineJoin: "round"
           })
-          .bindTooltip(tooltipText(`${segmentLabel}${segmentScheduleCopy(segmentDetail)}`))
-          .addTo(activeMap);
+          .bindTooltip(tooltipText(`${segmentLabel}${segmentScheduleCopy(segmentDetail)}`));
+        if (!hiddenRouteSegmentIndexSetRef.current.has(segment.index)) {
+          routeLine.addTo(activeMap);
+        }
         routeLinesRef.current[segment.index] = routeLine;
 
         routeLine.on("click", (event) => {
@@ -837,8 +844,10 @@ export function GpsTrackingView({
             tooltipText(
               `Início do arquivo GPX · ${firstSegmentLabel}${departureCopy(segmentDetails[firstSegmentIndex]?.departureTime)}`
             )
-          )
-          .addTo(activeMap);
+          );
+        if (!hiddenRouteSegmentIndexSetRef.current.has(firstSegmentIndex)) {
+          marker.addTo(activeMap);
+        }
         routeBoundaryMarkersRef.current.push({ segmentIndex: firstSegmentIndex, marker });
       }
       if (lastPoint) {
@@ -856,8 +865,10 @@ export function GpsTrackingView({
             tooltipText(
               `Fim do arquivo GPX · ${lastSegmentLabel}${arrivalCopy(segmentDetails[lastSegmentIndex]?.arrivalTime)}`
             )
-          )
-          .addTo(activeMap);
+          );
+        if (!hiddenRouteSegmentIndexSetRef.current.has(lastSegmentIndex)) {
+          marker.addTo(activeMap);
+        }
         routeBoundaryMarkersRef.current.push({ segmentIndex: lastSegmentIndex, marker });
       }
 
@@ -979,7 +990,6 @@ export function GpsTrackingView({
     route,
     segmentColors,
     segmentDetails,
-    segmentEndpoints,
     segmentDisplayLabels,
     focusRouteSegment,
     updateTruckMarker,
