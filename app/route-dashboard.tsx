@@ -141,6 +141,19 @@ type GpsPointDragSession = {
   overId: string;
 };
 
+export type UnifiedRouteItem = {
+  id: string;
+  kind: "standard-route" | "manual-route" | "gpx-segment";
+  name: string;
+  departureTime: string;
+  arrivalTime: string;
+  departureMinutes: number;
+  color?: string;
+  pointCount?: number;
+  routeObj?: TruckRoute;
+  segmentIndex?: number;
+};
+
 const STORAGE_KEY = "roteiro-truck-routes-v1";
 const GPS_POINT_CONFIGS_KEY = "roteiro-truck-gps-point-configs-v1";
 const GPS_POINTS_KEY = "roteiro-truck-gps-points-v1";
@@ -856,19 +869,102 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     );
   }, [routes, nowMinutes]);
 
-  const filteredRoutes = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase("pt-BR");
-    return routes
-      .filter(
-        (route) =>
-          !normalized ||
-          route.name.toLocaleLowerCase("pt-BR").includes(normalized)
-      )
-      .sort((a, b) => a.departure.localeCompare(b.departure));
-  }, [query, routes]);
 
-  const selectedRoute =
-    routes.find((route) => route.id === selectedId) ?? filteredRoutes[0];
+  const unifiedRouteItems = useMemo(() => {
+    const items: UnifiedRouteItem[] = [];
+
+    // 1. Standard and Manual routes
+    routes.forEach((route) => {
+      if (isValidManualPath(route.manualPath)) {
+        const depTime = route.manualSetup?.departureTime || route.departure || "";
+        const arrTime = route.manualSetup?.arrivalTime || route.arrivalForecast || "";
+        const depMins = depTime ? toMinutes(depTime) : Number.POSITIVE_INFINITY;
+
+        items.push({
+          id: route.id,
+          kind: "manual-route",
+          name: route.name,
+          departureTime: depTime,
+          arrivalTime: arrTime,
+          departureMinutes: depMins,
+          color: route.manualPathColor || "#0d9488",
+          pointCount: route.manualPath?.length ?? 0,
+          routeObj: route
+        });
+      } else {
+        const depTime = route.departure || "";
+        const arrTime = route.arrivalForecast || "";
+        const depMins = depTime ? toMinutes(depTime) : Number.POSITIVE_INFINITY;
+
+        items.push({
+          id: route.id,
+          kind: "standard-route",
+          name: route.name,
+          departureTime: depTime,
+          arrivalTime: arrTime,
+          departureMinutes: depMins,
+          color: "#0284c7",
+          routeObj: route
+        });
+      }
+    });
+
+    // 2. GPX segments
+    const renderedSegments = getRenderedRouteSegments(gpxRoute.segments, gpxRoute.segmentTimings);
+    renderedSegments.forEach((segment) => {
+      const color = routeSegmentColor(segment.index, gpsPointCatalog.segmentColors);
+      const label = routeSegmentDisplayLabel(segment.index, gpsPointCatalog.segmentDetails);
+      const detail = gpsPointCatalog.segmentDetails[segment.index];
+      const depTime = detail?.departureTime || segment.timing.startTime || "";
+      const arrTime = detail?.arrivalTime || segment.timing.endTime || "";
+      const depMins = depTime ? toMinutes(depTime) : Number.POSITIVE_INFINITY;
+
+      items.push({
+        id: `gpx-segment-${segment.index}`,
+        kind: "gpx-segment",
+        name: label,
+        departureTime: depTime,
+        arrivalTime: arrTime,
+        departureMinutes: depMins,
+        color,
+        pointCount: segment.points.length,
+        segmentIndex: segment.index
+      });
+    });
+
+    // 3. Sort strictly by departureMinutes (chronological order)
+    items.sort((a, b) => {
+      if (a.departureMinutes !== b.departureMinutes) {
+        return a.departureMinutes - b.departureMinutes;
+      }
+      return a.name.localeCompare(b.name, "pt-BR");
+    });
+
+    return items;
+  }, [routes, gpxRoute, gpsPointCatalog]);
+
+  const filteredUnifiedItems = useMemo(() => {
+    const term = query.trim().toLocaleLowerCase("pt-BR");
+    if (!term) return unifiedRouteItems;
+
+    return unifiedRouteItems.filter((item) => {
+      const nameMatch = item.name.toLocaleLowerCase("pt-BR").includes(term);
+      const depMatch = item.departureTime.toLocaleLowerCase("pt-BR").includes(term);
+      return nameMatch || depMatch;
+    });
+  }, [unifiedRouteItems, query]);
+
+  const selectedUnifiedItem = useMemo(() => {
+    return (
+      unifiedRouteItems.find((item) => item.id === selectedId) ??
+      filteredUnifiedItems[0] ??
+      null
+    );
+  }, [unifiedRouteItems, filteredUnifiedItems, selectedId]);
+
+  const selectedRoute = selectedUnifiedItem?.routeObj ?? null;
+  const selectedGpxSegmentIndex =
+    selectedUnifiedItem?.kind === "gpx-segment" ? selectedUnifiedItem.segmentIndex : undefined;
 
   const gpsPointStepCounts = useMemo(
     () => Object.fromEntries(
@@ -2016,19 +2112,60 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                   <div className="route-skeleton" />
                   <div className="route-skeleton" />
                 </>
-              ) : filteredRoutes.length ? (
-                filteredRoutes.map((route) => {
+              ) : filteredUnifiedItems.length ? (
+                filteredUnifiedItems.map((item) => {
+                  const isSelected = selectedUnifiedItem?.id === item.id;
+
+                  if (item.kind === "gpx-segment") {
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={`route-card route-card-gpx-segment ${isSelected ? "selected" : ""}`}
+                        onClick={() => setSelectedId(item.id)}
+                      >
+                        <span className="route-card-time" style={{ color: item.color || "#0284c7" }}>
+                          {item.departureTime || "GPX"}
+                        </span>
+                        <span className="route-card-main">
+                          <span className="route-card-top">
+                            <strong>{item.name}</strong>
+                            <span
+                              className="status-badge active"
+                              style={{
+                                backgroundColor: item.color ? `${item.color}22` : "rgba(14, 165, 233, 0.15)",
+                                color: item.color || "#0284c7",
+                                borderColor: item.color || "#0284c7"
+                              }}
+                            >
+                              <i style={{ backgroundColor: item.color || "#0284c7" }} />
+                              Trecho GPX
+                            </span>
+                          </span>
+                          <span className="route-destination">
+                            <MapPin size={14} />
+                            {item.arrivalTime ? `Chegada prevista às ${item.arrivalTime} · ` : ""}
+                            {item.pointCount} pontos no mapa
+                          </span>
+                        </span>
+                        <ArrowRight className="route-arrow" size={18} />
+                      </button>
+                    );
+                  }
+
+                  const route = item.routeObj!;
                   const status = getStatus(route, nowMinutes);
                   const progress = getProgress(route, nowMinutes);
                   const firstStage = route.stops.find((stop) => stop.type === "stage");
+
                   return (
                     <button
-                      key={route.id}
+                      key={item.id}
                       type="button"
-                      className={`route-card ${selectedRoute?.id === route.id ? "selected" : ""}`}
-                      onClick={() => setSelectedId(route.id)}
+                      className={`route-card ${isSelected ? "selected" : ""}`}
+                      onClick={() => setSelectedId(item.id)}
                     >
-                      <span className="route-card-time">{route.departure}</span>
+                      <span className="route-card-time">{item.departureTime || route.departure}</span>
                       <span className="route-card-main">
                         <span className="route-card-top">
                           <strong>{route.name}</strong>
@@ -2039,11 +2176,11 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                         </span>
                         <span className="route-destination">
                           <MapPin size={14} />
-                          Chegada prevista às {route.arrivalForecast}
+                          Chegada prevista às {item.arrivalTime || route.arrivalForecast}
                           {firstStage?.stageNumber && (
                             <em>Stage {firstStage.stageNumber}</em>
                           )}
-                          {isValidManualPath(route.manualPath) && (
+                          {item.kind === "manual-route" && (
                             <em>Traçado manual</em>
                           )}
                         </span>
@@ -2076,15 +2213,16 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           </div>
 
           <aside className="detail-panel panel">
-            {selectedRoute ? (
+            {selectedUnifiedItem ? (
               <RouteDetail
                 route={selectedRoute}
+                selectedGpxSegmentIndex={selectedGpxSegmentIndex}
                 gpxRoute={gpxRoute}
                 gpsPointCatalog={gpsPointCatalog}
                 gpsPoints={gpsPoints}
                 manualRoutes={manualRoutesForMap}
                 nowMinutes={nowMinutes}
-                onEdit={() => openEditRoute(selectedRoute)}
+                onEdit={() => selectedRoute && openEditRoute(selectedRoute)}
                 onOpenGps={() => {
                   setViewMode("gps");
                   setGpsFocusPointId(null);
@@ -2093,9 +2231,9 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                   setViewMode("gps");
                 }}
                 onOpenGpsPoint={(pointId) => openGps(pointId)}
-                onStartNavigation={() => startNavigationMode(selectedRoute.id)}
-                onAddFuel={() => addFuelStop(selectedRoute)}
-                onDelete={() => deleteRoute(selectedRoute)}
+                onStartNavigation={() => startNavigationMode(selectedUnifiedItem.id)}
+                onAddFuel={() => selectedRoute && addFuelStop(selectedRoute)}
+                onDelete={() => selectedRoute && deleteRoute(selectedRoute)}
               />
             ) : (
               <div className="detail-empty">
@@ -2156,6 +2294,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
 
 function RouteDetail({
   route,
+  selectedGpxSegmentIndex,
   gpxRoute,
   gpsPointCatalog,
   gpsPoints,
@@ -2169,7 +2308,8 @@ function RouteDetail({
   onAddFuel,
   onDelete
 }: {
-  route: TruckRoute;
+  route: TruckRoute | null;
+  selectedGpxSegmentIndex?: number;
   gpxRoute: GpxRouteData;
   gpsPointCatalog: GpsPointCatalog;
   gpsPoints: ResolvedGpsPoint[];
@@ -2192,6 +2332,82 @@ function RouteDetail({
     () => new Map(gpsPoints.map((point) => [point.id, point])),
     [gpsPoints]
   );
+
+  if (selectedGpxSegmentIndex !== undefined) {
+    const color = routeSegmentColor(selectedGpxSegmentIndex, gpsPointCatalog.segmentColors);
+    const label = routeSegmentDisplayLabel(selectedGpxSegmentIndex, gpsPointCatalog.segmentDetails);
+    const detail = gpsPointCatalog.segmentDetails[selectedGpxSegmentIndex];
+    const endpoint = gpsPointCatalog.segmentEndpoints[selectedGpxSegmentIndex];
+    const segment = renderedSegments.find((s) => s.index === selectedGpxSegmentIndex);
+
+    const startPoint = endpoint?.startPointId ? pointsById.get(endpoint.startPointId) : null;
+    const endPoint = endpoint?.endPointId ? pointsById.get(endpoint.endPointId) : null;
+
+    return (
+      <div className="detail-content gpx-segment-detail">
+        <div className="detail-heading">
+          <div>
+            <span className="eyebrow" style={{ color }}>TRECHO GPX DA ROTA</span>
+            <h2>{label}</h2>
+            <p className="manual-route-detail-note">
+              <MapPin size={14} /> {segment?.points.length || 0} pontos de coordenadas GPX
+            </p>
+          </div>
+        </div>
+
+        <div className="detail-metrics route-metrics-two">
+          <div>
+            <span><Clock3 size={15} /> Horário de saída</span>
+            <strong>{detail?.departureTime || segment?.timing.startTime || "Não definido"}</strong>
+          </div>
+          <div>
+            <span><Clock3 size={15} /> Horário de chegada</span>
+            <strong>{detail?.arrivalTime || segment?.timing.endTime || "Não definido"}</strong>
+          </div>
+        </div>
+
+        {(startPoint || endPoint) && (
+          <div className="journey-header" style={{ marginTop: "16px" }}>
+            <h3>Pontos de Início e Fim</h3>
+            {startPoint && <p style={{ fontSize: "13px", color: "#334155", marginTop: "4px" }}><strong>Início:</strong> {startPoint.name}</p>}
+            {endPoint && <p style={{ fontSize: "13px", color: "#334155", marginTop: "4px" }}><strong>Fim:</strong> {endPoint.name}</p>}
+          </div>
+        )}
+
+        <div className="manual-route-detail-action" style={{ marginTop: "20px" }}>
+          <p>Inicie o modo navegação neste trecho ou veja a rota no mapa GPS.</p>
+          <div style={{ display: "flex", gap: "8px", width: "100%" }}>
+            <button
+              className="primary-button navigation-mode-button"
+              style={{ flex: 1 }}
+              type="button"
+              onClick={onStartNavigation}
+            >
+              <Navigation size={17} /> Navegar
+            </button>
+            <button
+              className="secondary-button"
+              style={{ flex: 1 }}
+              type="button"
+              onClick={() => onOpenGpsSegment(selectedGpxSegmentIndex)}
+            >
+              <Satellite size={17} /> Ver no GPS
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!route) {
+    return (
+      <div className="detail-empty">
+        <span><RouteIcon size={27} /></span>
+        <h3>Selecione uma rota ou trecho</h3>
+        <p>Os detalhes e o andamento aparecerão aqui.</p>
+      </div>
+    );
+  }
 
   if (isValidManualPath(route.manualPath)) {
     const setup = route.manualSetup;

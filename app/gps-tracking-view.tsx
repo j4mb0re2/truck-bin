@@ -55,6 +55,15 @@ type EndpointMapSelection =
       routeId: string;
       side: SegmentEndpointSide;
     };
+function parseTimeToMinutes(time: string | undefined): number {
+  if (!time) return Number.POSITIVE_INFINITY;
+  const parts = time.split(":").map(Number);
+  if (parts.length < 2 || Number.isNaN(parts[0]) || Number.isNaN(parts[1])) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return parts[0] * 60 + parts[1];
+}
+
 type ManualRouteSetup = {
   startPointId?: string;
   endPointId?: string;
@@ -579,6 +588,28 @@ export function GpsTrackingView({
   const initialWaypoint = route.waypoints.find((point) => point.id === initialWaypointId);
   const selectedManualRoute = manualRoutes.find((manualRoute) => manualRoute.id === selectedManualRouteId);
   const hasRouteFocus = selectedRouteSegmentIndex !== null || selectedManualRouteId !== null;
+
+  const sortedVisibleRouteSegments = useMemo(() => {
+    return [...visibleRouteSegments].sort((a, b) => {
+      const depA = segmentDetails[a.index]?.departureTime || a.timing.startTime || "";
+      const depB = segmentDetails[b.index]?.departureTime || b.timing.startTime || "";
+      const minA = parseTimeToMinutes(depA);
+      const minB = parseTimeToMinutes(depB);
+      if (minA !== minB) return minA - minB;
+      return a.index - b.index;
+    });
+  }, [visibleRouteSegments, segmentDetails]);
+
+  const sortedManualRoutes = useMemo(() => {
+    return [...manualRoutes].sort((a, b) => {
+      const depA = a.setup?.departureTime || "";
+      const depB = b.setup?.departureTime || "";
+      const minA = parseTimeToMinutes(depA);
+      const minB = parseTimeToMinutes(depB);
+      if (minA !== minB) return minA - minB;
+      return a.name.localeCompare(b.name, "pt-BR");
+    });
+  }, [manualRoutes]);
 
   const centerRoute = useCallback(() => {
     const map = mapRef.current;
@@ -2048,7 +2079,7 @@ export function GpsTrackingView({
                 desenhadas, escolha os pontos de início e fim e seus horários.
               </p>
               <ol>
-                {visibleRouteSegments.map((segment) => {
+                {sortedVisibleRouteSegments.map((segment) => {
                   const endpoints = segmentEndpoints[segment.index] ?? {};
                   const isSegmentVisible = !hiddenRouteSegmentIndexSet.has(segment.index);
                   const isMarkingStart =
@@ -2114,7 +2145,7 @@ export function GpsTrackingView({
                     Rotas desenhadas manualmente
                   </li>
                 )}
-                {manualRoutes.map((manualRoute, index) => {
+                {sortedManualRoutes.map((manualRoute, index) => {
                   const color = manualRoute.color ?? MANUAL_ROUTE_COLORS[index % MANUAL_ROUTE_COLORS.length];
                   const isRouteVisible = !hiddenManualRouteIdSet.has(manualRoute.id);
                   const isRouteSelected = selectedManualRouteId === manualRoute.id;
