@@ -2,10 +2,14 @@
 
 import {
   ArrowLeft,
+  Bell,
+  CheckCircle2,
   ClipboardList,
+  Clock,
   Crosshair,
   Eye,
   EyeOff,
+  FileText,
   Globe,
   Layers,
   MapPinned,
@@ -25,6 +29,7 @@ import type { ReactNode } from "react";
 import type { GpxCoordinate, GpxRouteData } from "../lib/gpx-route";
 import {
   PROCEDURE_CONFIG,
+  calculateDistanceMeters,
   closestCoordinateOnPolyline,
   getRenderedRouteSegments,
   routeSegmentColor,
@@ -48,6 +53,14 @@ type LivePosition = {
   longitude: number;
   accuracy: number;
   updatedAt: string;
+};
+
+export type ActiveProcedurePopup = {
+  key: string;
+  title: string;
+  procedure: RouteSegmentProcedure;
+  distanceMeters: number;
+  targetCoordinate: GpxCoordinate;
 };
 type EndpointMapSelection =
   | {
@@ -146,7 +159,7 @@ function manualRouteScheduleCopy(setup: ManualRouteSetup) {
   return `${departureCopy(setup.departureTime)}${arrivalCopy(setup.arrivalTime)}`;
 }
 
-function SegmentDetailsForm({
+export function SegmentDetailsForm({
   segmentIndex,
   detail,
   endpoints,
@@ -158,24 +171,29 @@ function SegmentDetailsForm({
   onSave,
   onAssignEndpoint,
   onMarkEndpoint,
-  onOpenProcedureModal
+  onOpenProcedureModal,
+  onOpenProcedurePopup
 }: {
   segmentIndex: number;
-  detail: RouteSegmentDetail | undefined;
+  detail?: RouteSegmentDetail;
   endpoints: RouteSegmentEndpoints[number];
   waypoints: ReadonlyArray<{ id: string; name: string }>;
-  disabled: boolean;
-  canMarkEndpoints: boolean;
-  isMarkingStart: boolean;
-  isMarkingEnd: boolean;
+  disabled?: boolean;
+  canMarkEndpoints?: boolean;
+  isMarkingStart?: boolean;
+  isMarkingEnd?: boolean;
   onSave: (detail: RouteSegmentDetail) => void;
   onAssignEndpoint: (side: SegmentEndpointSide, pointId: string | null) => void;
   onMarkEndpoint: (side: SegmentEndpointSide) => void;
-  onOpenProcedureModal?: () => void;
+  onOpenProcedureModal: () => void;
+  onOpenProcedurePopup?: (title: string, procedure: RouteSegmentProcedure) => void;
 }) {
-  const [name, setName] = useState(() => detail?.name ?? "");
-  const [departureTime, setDepartureTime] = useState(() => detail?.departureTime ?? "");
-  const [arrivalTime, setArrivalTime] = useState(() => detail?.arrivalTime ?? "");
+  const [name, setName] = useState(detail?.name ?? "");
+  const [departureTime, setDepartureTime] = useState(detail?.departureTime ?? "");
+  const [arrivalTime, setArrivalTime] = useState(detail?.arrivalTime ?? "");
+
+  const startPointId = endpoints.startPointId ?? "";
+  const endPointId = endpoints.endPointId ?? "";
 
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -185,7 +203,7 @@ function SegmentDetailsForm({
   return (
     <form className="gps-segment-details" onSubmit={submit}>
       <label className="gps-segment-detail-name">
-        <span>Nome do trecho</span>
+        <span>Nome personalizado do trecho</span>
         <input
           type="text"
           value={name}
@@ -195,12 +213,12 @@ function SegmentDetailsForm({
         />
       </label>
       <div className="gps-segment-endpoint-controls">
-        <section className="gps-segment-endpoint-group" aria-label="Ponto de início do trecho">
+        <section className="gps-segment-endpoint-group" aria-label={`Ponto de início do trecho ${segmentIndex + 1}`}>
           <div className="gps-segment-endpoint-row">
             <label className="gps-segment-endpoint-field">
-              <span>Início</span>
+              <span>Ponto de início</span>
               <select
-                value={endpoints.startPointId ?? ""}
+                value={startPointId}
                 disabled={disabled}
                 onChange={(event) => onAssignEndpoint("start", event.target.value || null)}
               >
@@ -223,7 +241,7 @@ function SegmentDetailsForm({
             </button>
           </div>
           <label className="gps-segment-endpoint-time">
-            <span>Horário de saída</span>
+            <span>Horário de partida</span>
             <input
               type="time"
               value={departureTime}
@@ -232,12 +250,12 @@ function SegmentDetailsForm({
             />
           </label>
         </section>
-        <section className="gps-segment-endpoint-group" aria-label="Ponto de fim do trecho">
+        <section className="gps-segment-endpoint-group" aria-label={`Ponto de fim do trecho ${segmentIndex + 1}`}>
           <div className="gps-segment-endpoint-row">
             <label className="gps-segment-endpoint-field">
-              <span>Fim</span>
+              <span>Ponto de fim</span>
               <select
-                value={endpoints.endPointId ?? ""}
+                value={endPointId}
                 disabled={disabled}
                 onChange={(event) => onAssignEndpoint("end", event.target.value || null)}
               >
@@ -272,8 +290,8 @@ function SegmentDetailsForm({
       </div>
       <div className="gps-segment-procedure-bar">
         {detail?.procedure && (
-          <div className="gps-procedure-badge" style={{ flexDirection: "column", alignItems: "flex-start", gap: "2px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <div className="gps-procedure-badge" style={{ flexDirection: "column", alignItems: "flex-start", gap: "4px", width: "100%" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", width: "100%" }}>
               <span className="proc-icon">{PROCEDURE_CONFIG[detail.procedure.procedureType].icon}</span>
               <strong>{PROCEDURE_CONFIG[detail.procedure.procedureType].label}</strong>
               <small>({detail.procedure.endpointSide === "start" ? "Início" : "Fim"})</small>
@@ -281,6 +299,15 @@ function SegmentDetailsForm({
                 <span className="proc-time-tag">
                   ⏰ {detail.procedure.startTime || "--:--"} → {detail.procedure.endTime || "--:--"}
                 </span>
+              )}
+              {onOpenProcedurePopup && (
+                <button
+                  type="button"
+                  style={{ marginLeft: "auto", fontSize: "11px", padding: "2px 8px", borderRadius: "4px", border: "1px solid #0284c7", background: "#e0f2fe", color: "#0284c7", cursor: "pointer", fontWeight: 700 }}
+                  onClick={() => onOpenProcedurePopup(detail.name || `Trecho ${segmentIndex + 1}`, detail.procedure!)}
+                >
+                  🔔 Ver Instruções
+                </button>
               )}
             </div>
             {detail.procedure.notes && (
@@ -306,7 +333,7 @@ function SegmentDetailsForm({
   );
 }
 
-function ManualRouteDetailsForm({
+export function ManualRouteDetailsForm({
   routeName,
   setup,
   waypoints,
@@ -316,6 +343,7 @@ function ManualRouteDetailsForm({
   isMarkingEnd,
   onMarkEndpoint,
   onOpenProcedureModal,
+  onOpenProcedurePopup,
   onSave
 }: {
   routeName: string;
@@ -327,6 +355,7 @@ function ManualRouteDetailsForm({
   isMarkingEnd: boolean;
   onMarkEndpoint: (side: SegmentEndpointSide) => void;
   onOpenProcedureModal?: () => void;
+  onOpenProcedurePopup?: (title: string, procedure: RouteSegmentProcedure) => void;
   onSave: (name: string, setup: ManualRouteSetup) => void;
 }) {
   const [name, setName] = useState(() => routeName);
@@ -436,8 +465,8 @@ function ManualRouteDetailsForm({
       </div>
       <div className="gps-segment-procedure-bar">
         {setup?.procedure && (
-          <div className="gps-procedure-badge" style={{ flexDirection: "column", alignItems: "flex-start", gap: "2px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <div className="gps-procedure-badge" style={{ flexDirection: "column", alignItems: "flex-start", gap: "4px", width: "100%" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", width: "100%" }}>
               <span className="proc-icon">{PROCEDURE_CONFIG[setup.procedure.procedureType].icon}</span>
               <strong>{PROCEDURE_CONFIG[setup.procedure.procedureType].label}</strong>
               <small>({setup.procedure.endpointSide === "start" ? "Início" : "Fim"})</small>
@@ -445,6 +474,15 @@ function ManualRouteDetailsForm({
                 <span className="proc-time-tag">
                   ⏰ {setup.procedure.startTime || "--:--"} → {setup.procedure.endTime || "--:--"}
                 </span>
+              )}
+              {onOpenProcedurePopup && (
+                <button
+                  type="button"
+                  style={{ marginLeft: "auto", fontSize: "11px", padding: "2px 8px", borderRadius: "4px", border: "1px solid #0284c7", background: "#e0f2fe", color: "#0284c7", cursor: "pointer", fontWeight: 700 }}
+                  onClick={() => onOpenProcedurePopup(routeName, setup.procedure!)}
+                >
+                  🔔 Ver Instruções
+                </button>
               )}
             </div>
             {setup.procedure.notes && (
@@ -597,6 +635,8 @@ export function GpsTrackingView({
     | { kind: "manual-route"; routeId: string; title: string; currentProcedure?: RouteSegmentProcedure }
     | null
   >(null);
+  const [activeProcedurePopup, setActiveProcedurePopup] = useState<ActiveProcedurePopup | null>(null);
+  const [dismissedProcedureKeys, setDismissedProcedureKeys] = useState<string[]>([]);
 
   function handleSaveProcedure(procedure: RouteSegmentProcedure | null) {
     if (!procedureModalTarget) return;
@@ -744,6 +784,92 @@ export function GpsTrackingView({
 
     return items;
   }, [visibleRouteSegments, segmentDetails, segmentDisplayLabels, manualRoutes]);
+
+  // Checagem de Geofence: Detecta se o caminhão chegou ao local do procedimento
+  useEffect(() => {
+    if (!livePosition) return;
+
+    for (const item of sortedAllGpsItems) {
+      const procedure =
+        item.kind === "segment"
+          ? segmentDetails[item.segment.index]?.procedure
+          : item.manualRoute.setup?.procedure;
+
+      if (!procedure) continue;
+
+      const popupKey = `${item.kind}-${item.kind === "segment" ? item.segment.index : item.manualRoute.id}-${procedure.endpointSide}`;
+      if (dismissedProcedureKeys.includes(popupKey)) continue;
+
+      let targetCoord: GpxCoordinate | undefined;
+      const waypointsById = new Map(route.waypoints.map((w) => [w.id, w]));
+
+      if (item.kind === "segment") {
+        const ep = segmentEndpoints[item.segment.index];
+        const assignedId = procedure.endpointSide === "start" ? ep?.startPointId : ep?.endPointId;
+        const assignedWp = assignedId ? waypointsById.get(assignedId) : undefined;
+
+        if (assignedWp) {
+          targetCoord = { latitude: assignedWp.latitude, longitude: assignedWp.longitude };
+        } else if (item.segment.points.length > 0) {
+          const pt =
+            procedure.endpointSide === "start"
+              ? item.segment.points[0]
+              : item.segment.points[item.segment.points.length - 1];
+          targetCoord = { latitude: pt.latitude, longitude: pt.longitude };
+        }
+      } else {
+        const setup = item.manualRoute.setup;
+        const assignedId = procedure.endpointSide === "start" ? setup.startPointId : setup.endPointId;
+        const assignedWp = assignedId ? waypointsById.get(assignedId) : undefined;
+
+        if (assignedWp) {
+          targetCoord = { latitude: assignedWp.latitude, longitude: assignedWp.longitude };
+        } else if (item.manualRoute.points.length > 0) {
+          const pt =
+            procedure.endpointSide === "start"
+              ? item.manualRoute.points[0]
+              : item.manualRoute.points[item.manualRoute.points.length - 1];
+          targetCoord = { latitude: pt.latitude, longitude: pt.longitude };
+        }
+      }
+
+      if (!targetCoord) continue;
+
+      const distance = calculateDistanceMeters(
+        livePosition.latitude,
+        livePosition.longitude,
+        targetCoord.latitude,
+        targetCoord.longitude
+      );
+
+      // Se o caminhão estiver a menos de 300m do ponto do procedimento
+      if (distance <= 300) {
+        const title =
+          item.kind === "segment"
+            ? (segmentDisplayLabels[item.segment.index] ?? routeSegmentLabel(item.segment.index))
+            : item.manualRoute.name;
+
+        const timer = setTimeout(() => {
+          setActiveProcedurePopup({
+            key: popupKey,
+            title,
+            procedure,
+            distanceMeters: Math.round(distance),
+            targetCoordinate: targetCoord
+          });
+        }, 0);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [
+    livePosition,
+    sortedAllGpsItems,
+    segmentDetails,
+    segmentEndpoints,
+    route.waypoints,
+    segmentDisplayLabels,
+    dismissedProcedureKeys
+  ]);
 
   const centerRoute = useCallback(() => {
     const map = mapRef.current;
@@ -2280,6 +2406,16 @@ export function GpsTrackingView({
                               currentProcedure: segmentDetails[segment.index]?.procedure
                             })
                           }
+                          onOpenProcedurePopup={(title, procedure) => {
+                            const popupKey = `segment-${segment.index}-${procedure.endpointSide}`;
+                            setActiveProcedurePopup({
+                              key: popupKey,
+                              title,
+                              procedure,
+                              distanceMeters: livePosition ? 45 : 0,
+                              targetCoordinate: { latitude: 0, longitude: 0 }
+                            });
+                          }}
                         />
                       </li>
                     );
@@ -2351,6 +2487,16 @@ export function GpsTrackingView({
                             currentProcedure: setup.procedure
                           })
                         }
+                        onOpenProcedurePopup={(title, procedure) => {
+                          const popupKey = `manual-${manualRoute.id}-${procedure.endpointSide}`;
+                          setActiveProcedurePopup({
+                            key: popupKey,
+                            title,
+                            procedure,
+                            distanceMeters: livePosition ? 45 : 0,
+                            targetCoordinate: { latitude: 0, longitude: 0 }
+                          });
+                        }}
                       />
                     </li>
                   );
@@ -2373,7 +2519,135 @@ export function GpsTrackingView({
           onSave={handleSaveProcedure}
         />
       )}
+
+      {activeProcedurePopup && (
+        <ActiveProcedurePopupModal
+          popup={activeProcedurePopup}
+          onClose={() => {
+            setDismissedProcedureKeys((current) => [...current, activeProcedurePopup.key]);
+            setActiveProcedurePopup(null);
+          }}
+          onComplete={() => {
+            setDismissedProcedureKeys((current) => [...current, activeProcedurePopup.key]);
+            setActiveProcedurePopup(null);
+          }}
+        />
+      )}
     </main>
+  );
+}
+
+export function ActiveProcedurePopupModal({
+  popup,
+  onClose,
+  onComplete
+}: {
+  popup: ActiveProcedurePopup;
+  onClose: () => void;
+  onComplete: () => void;
+}) {
+  const [now, setNow] = useState(() => new Date());
+  const procConfig = PROCEDURE_CONFIG[popup.procedure.procedureType];
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const endTimeStr = popup.procedure.endTime;
+  let remainingText = "Sem horário final definido";
+  let isExpired = false;
+
+  if (endTimeStr) {
+    const [targetH, targetM] = endTimeStr.split(":").map(Number);
+    if (!isNaN(targetH) && !isNaN(targetM)) {
+      const target = new Date(now);
+      target.setHours(targetH, targetM, 0, 0);
+
+      const diffMs = target.getTime() - now.getTime();
+      const totalSec = Math.floor(diffMs / 1000);
+      const diffMin = Math.floor(totalSec / 60);
+      const remSec = Math.abs(totalSec % 60);
+
+      if (diffMs <= 0) {
+        isExpired = true;
+        const pastMins = Math.abs(diffMin);
+        remainingText = `⚠️ TEMPO ESGOTADO! (+${pastMins} min excedidos)`;
+      } else {
+        remainingText = `⏱️ ${diffMin} MIN ${remSec.toString().padStart(2, "0")} SEC RESTANTES`;
+      }
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" style={{ zIndex: 1100 }}>
+      <div className="modal-card active-procedure-modal">
+        {/* Banner com Contador de tempo no topo */}
+        <div className={`countdown-header-banner ${isExpired ? "expired" : ""}`}>
+          <span style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", opacity: 0.9, display: "inline-flex", alignItems: "center", gap: "4px" }}>
+            <Bell size={13} />
+            {isExpired ? "ALERTA DE TEMPO DE PROCEDIMENTO" : "TEMPO DISPONÍVEL DA OPERAÇÃO"}
+          </span>
+          <div className="countdown-timer-value">
+            <Clock size={24} />
+            <span>{remainingText}</span>
+          </div>
+          {popup.procedure.startTime && (
+            <small style={{ display: "block", marginTop: "4px", opacity: 0.85, fontSize: "11px" }}>
+              Janela prevista: {popup.procedure.startTime} às {popup.procedure.endTime || "--:--"}
+            </small>
+          )}
+        </div>
+
+        <div className="modal-body" style={{ padding: "20px 24px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "14px" }}>
+            <span style={{ fontSize: "36px", lineHeight: 1 }}>{procConfig.icon}</span>
+            <div>
+              <span className="eyebrow" style={{ color: "#0284c7" }}>
+                📍 CHEGADA AO LOCAL ({popup.procedure.endpointSide === "start" ? "Início da rota" : "Fim da rota"})
+              </span>
+              <h3 style={{ margin: "2px 0 0 0", fontSize: "18px", fontWeight: 800, color: "#0f172a" }}>
+                {procConfig.label} — {popup.title}
+              </h3>
+            </div>
+          </div>
+
+          {popup.distanceMeters > 0 && (
+            <div style={{ fontSize: "12px", color: "#64748b", display: "flex", alignItems: "center", gap: "6px", marginBottom: "12px" }}>
+              <MapPinned size={14} style={{ color: "#0284c7" }} />
+              <span>Distância detectada do ponto: <strong>{popup.distanceMeters} metros</strong></span>
+            </div>
+          )}
+
+          {/* Instruções / Observação Cadastrada */}
+          <div className="proc-instruction-box">
+            <h4>
+              <FileText size={15} style={{ color: "#0284c7" }} />
+              INSTRUÇÕES E OBSERVAÇÕES CADASTRADAS:
+            </h4>
+            <p>
+              {popup.procedure.notes ? popup.procedure.notes : "Nenhuma observação cadastrada para este procedimento."}
+            </p>
+          </div>
+        </div>
+
+        <div className="modal-actions" style={{ padding: "14px 24px 20px", display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+          <button type="button" className="secondary-button" onClick={onClose}>
+            ✖️ Fechar
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            style={{ backgroundColor: "#10b981", borderColor: "#059669" }}
+            onClick={onComplete}
+          >
+            <CheckCircle2 size={16} /> Concluir Operação
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
