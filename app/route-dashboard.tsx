@@ -131,7 +131,7 @@ const STORAGE_KEY = "roteiro-truck-routes-v1";
 const FIXED_POINTS_KEY = "roteiro-truck-fixed-points-v1";
 const GPS_POINT_CONFIGS_KEY = "roteiro-truck-gps-point-configs-v1";
 const GPS_POINTS_KEY = "roteiro-truck-gps-points-v1";
-const BACKUP_VERSION = 8;
+const BACKUP_VERSION = 9;
 const EMPTY_GPS_POINT_CATALOG: GpsPointCatalog = {
   pointOrder: [],
   pointNames: {},
@@ -413,7 +413,12 @@ function normalizeGpsPointCatalog(value: unknown): GpsPointCatalog {
           const departureTime = isRouteSegmentDepartureTime(saved.departureTime)
             ? saved.departureTime
             : "";
-          if (name || departureTime) details[index] = { name, departureTime };
+          const arrivalTime = isRouteSegmentDepartureTime(saved.arrivalTime)
+            ? saved.arrivalTime
+            : "";
+          if (name || departureTime || arrivalTime) {
+            details[index] = { name, departureTime, arrivalTime };
+          }
           return details;
         },
         {}
@@ -1143,11 +1148,14 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     const departureTime = isRouteSegmentDepartureTime(details.departureTime)
       ? details.departureTime
       : "";
+    const arrivalTime = isRouteSegmentDepartureTime(details.arrivalTime)
+      ? details.arrivalTime
+      : "";
 
     setGpsPointCatalog((current) => {
       const segmentDetails = { ...current.segmentDetails };
-      if (name || departureTime) {
-        segmentDetails[segmentIndex] = { name, departureTime };
+      if (name || departureTime || arrivalTime) {
+        segmentDetails[segmentIndex] = { name, departureTime, arrivalTime };
       } else {
         delete segmentDetails[segmentIndex];
       }
@@ -1618,6 +1626,14 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                       segmentIndex === undefined
                         ? ""
                         : gpsPointCatalog.segmentDetails[segmentIndex]?.departureTime ?? "";
+                    const segmentArrivalTime =
+                      segmentIndex === undefined
+                        ? ""
+                        : gpsPointCatalog.segmentDetails[segmentIndex]?.arrivalTime ?? "";
+                    const segmentSchedule = [
+                      segmentDepartureTime ? `Saída ${segmentDepartureTime}` : "",
+                      segmentArrivalTime ? `Chegada ${segmentArrivalTime}` : ""
+                    ].filter(Boolean).join(" · ");
                     const isDraggingPoint = gpsPointDrag?.activeId === point.id;
                     const isDropTarget = Boolean(
                       gpsPointDrag &&
@@ -1649,7 +1665,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                             <strong>{point.name}</strong>
                             <small>
                               {segmentLabel
-                                ? `${segmentLabel}${segmentDepartureTime ? ` · Saída ${segmentDepartureTime}` : ""} · `
+                                ? `${segmentLabel}${segmentSchedule ? ` · ${segmentSchedule}` : ""} · `
                                 : ""}
                               {gpsPointScheduleLabel(config, waypointTimeLabel(point.time, point.description))}
                             </small>

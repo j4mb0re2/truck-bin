@@ -22,6 +22,7 @@ export type RouteSegmentEndpoints = Record<number, RouteSegmentEndpoint>;
 export type RouteSegmentDetail = {
   name?: string;
   departureTime?: string;
+  arrivalTime?: string;
 };
 
 export type RouteSegmentDetails = Record<number, RouteSegmentDetail>;

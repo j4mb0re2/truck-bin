@@ -3,6 +3,8 @@
 import {
   ArrowLeft,
   Crosshair,
+  Eye,
+  EyeOff,
   MapPinned,
   Navigation,
   Pencil,
@@ -47,6 +49,10 @@ type ManualMapRoute = {
   id: string;
   name: string;
   points: GpxCoordinate[];
+};
+type RouteBoundaryMarker = {
+  segmentIndex: number;
+  marker: import("leaflet").Marker;
 };
 
 const MANUAL_ROUTE_COLORS = ["#0f766e", "#b7791f", "#5b5bd6", "#b45363"] as const;
@@ -95,23 +101,46 @@ function departureCopy(departureTime: string | undefined) {
   return departureTime ? ` · Saída às ${departureTime}` : "";
 }
 
+function arrivalCopy(arrivalTime: string | undefined) {
+  return arrivalTime ? ` · Chegada às ${arrivalTime}` : "";
+}
+
+function segmentScheduleCopy(detail: RouteSegmentDetail | undefined) {
+  return `${departureCopy(detail?.departureTime)}${arrivalCopy(detail?.arrivalTime)}`;
+}
+
 function SegmentDetailsForm({
   segmentIndex,
   detail,
+  endpoints,
+  waypoints,
   disabled,
-  onSave
+  canMarkEndpoints,
+  isMarkingStart,
+  isMarkingEnd,
+  onSave,
+  onAssignEndpoint,
+  onMarkEndpoint
 }: {
   segmentIndex: number;
   detail: RouteSegmentDetail | undefined;
+  endpoints: RouteSegmentEndpoints[number];
+  waypoints: ReadonlyArray<{ id: string; name: string }>;
   disabled: boolean;
+  canMarkEndpoints: boolean;
+  isMarkingStart: boolean;
+  isMarkingEnd: boolean;
   onSave: (detail: RouteSegmentDetail) => void;
+  onAssignEndpoint: (side: SegmentEndpointSide, pointId: string | null) => void;
+  onMarkEndpoint: (side: SegmentEndpointSide) => void;
 }) {
   const [name, setName] = useState(() => detail?.name ?? "");
   const [departureTime, setDepartureTime] = useState(() => detail?.departureTime ?? "");
+  const [arrivalTime, setArrivalTime] = useState(() => detail?.arrivalTime ?? "");
 
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onSave({ name, departureTime });
+    onSave({ name, departureTime, arrivalTime });
   }
 
   return (
@@ -126,15 +155,82 @@ function SegmentDetailsForm({
           onChange={(event) => setName(event.target.value)}
         />
       </label>
-      <label className="gps-segment-detail-time">
-        <span>Horário de saída</span>
-        <input
-          type="time"
-          value={departureTime}
-          disabled={disabled}
-          onChange={(event) => setDepartureTime(event.target.value)}
-        />
-      </label>
+      <div className="gps-segment-endpoint-controls">
+        <section className="gps-segment-endpoint-group" aria-label="Ponto de início do trecho">
+          <div className="gps-segment-endpoint-row">
+            <label className="gps-segment-endpoint-field">
+              <span>Início</span>
+              <select
+                value={endpoints.startPointId ?? ""}
+                disabled={disabled}
+                onChange={(event) => onAssignEndpoint("start", event.target.value || null)}
+              >
+                <option value="">Usar início da gravação</option>
+                {waypoints.map((point, pointIndex) => (
+                  <option key={point.id} value={point.id}>
+                    {pointIndex + 1}. {point.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className={`gps-mark-endpoint-button ${isMarkingStart ? "is-active" : ""}`}
+              type="button"
+              disabled={!canMarkEndpoints}
+              aria-pressed={isMarkingStart}
+              onClick={() => onMarkEndpoint("start")}
+            >
+              <MapPinned size={12} /> {isMarkingStart ? "Clique na linha" : "Marcar na linha"}
+            </button>
+          </div>
+          <label className="gps-segment-endpoint-time">
+            <span>Horário de saída</span>
+            <input
+              type="time"
+              value={departureTime}
+              disabled={disabled}
+              onChange={(event) => setDepartureTime(event.target.value)}
+            />
+          </label>
+        </section>
+        <section className="gps-segment-endpoint-group" aria-label="Ponto de fim do trecho">
+          <div className="gps-segment-endpoint-row">
+            <label className="gps-segment-endpoint-field">
+              <span>Fim</span>
+              <select
+                value={endpoints.endPointId ?? ""}
+                disabled={disabled}
+                onChange={(event) => onAssignEndpoint("end", event.target.value || null)}
+              >
+                <option value="">Usar fim da gravação</option>
+                {waypoints.map((point, pointIndex) => (
+                  <option key={point.id} value={point.id}>
+                    {pointIndex + 1}. {point.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className={`gps-mark-endpoint-button ${isMarkingEnd ? "is-active" : ""}`}
+              type="button"
+              disabled={!canMarkEndpoints}
+              aria-pressed={isMarkingEnd}
+              onClick={() => onMarkEndpoint("end")}
+            >
+              <MapPinned size={12} /> {isMarkingEnd ? "Clique na linha" : "Marcar na linha"}
+            </button>
+          </div>
+          <label className="gps-segment-endpoint-time">
+            <span>Horário de chegada</span>
+            <input
+              type="time"
+              value={arrivalTime}
+              disabled={disabled}
+              onChange={(event) => setArrivalTime(event.target.value)}
+            />
+          </label>
+        </section>
+      </div>
       <button className="gps-save-segment-details-button" type="submit" disabled={disabled}>
         <Save size={12} /> Salvar trecho
       </button>
@@ -205,6 +301,7 @@ export function GpsTrackingView({
   const endpointMapSelectionRef = useRef<EndpointMapSelection | null>(null);
   const routeLineClickRef = useRef(false);
   const routeLinesRef = useRef<Record<number, import("leaflet").Polyline>>({});
+  const routeBoundaryMarkersRef = useRef<RouteBoundaryMarker[]>([]);
   const routeEndpointMarkersRef = useRef<import("leaflet").Marker[]>([]);
   const manualRouteDraftRef = useRef<GpxCoordinate[]>([]);
   const manualRouteDraftLineRef = useRef<import("leaflet").Polyline | null>(null);
@@ -222,6 +319,7 @@ export function GpsTrackingView({
   const [pendingPointPositionCount, setPendingPointPositionCount] = useState(0);
   const [endpointMapSelection, setEndpointMapSelection] = useState<EndpointMapSelection | null>(null);
   const [selectedRouteSegmentIndex, setSelectedRouteSegmentIndex] = useState<number | null>(null);
+  const [hiddenRouteSegmentIndexes, setHiddenRouteSegmentIndexes] = useState<number[]>([]);
   const [isDrawingManualRoute, setIsDrawingManualRoute] = useState(false);
   const [manualRouteDraft, setManualRouteDraft] = useState<GpxCoordinate[]>([]);
 
@@ -257,6 +355,10 @@ export function GpsTrackingView({
       ])
     ) as Record<number, string>,
     [segmentDetails, visibleRouteSegments]
+  );
+  const hiddenRouteSegmentIndexSet = useMemo(
+    () => new Set(hiddenRouteSegmentIndexes),
+    [hiddenRouteSegmentIndexes]
   );
   const manualRoutePointCount = useMemo(
     () => manualRoutes.reduce((total, manualRoute) => total + manualRoute.points.length, 0),
@@ -306,6 +408,27 @@ export function GpsTrackingView({
   const focusRouteSegment = useCallback((segmentIndex: number | null) => {
     setSelectedRouteSegmentIndex(segmentIndex);
   }, []);
+
+  const toggleRouteSegmentVisibility = useCallback(
+    (segmentIndex: number) => {
+      const isVisible = !hiddenRouteSegmentIndexSet.has(segmentIndex);
+      setHiddenRouteSegmentIndexes((current) =>
+        isVisible
+          ? [...current, segmentIndex]
+          : current.filter((index) => index !== segmentIndex)
+      );
+
+      if (!isVisible) return;
+
+      if (selectedRouteSegmentIndex === segmentIndex) {
+        focusRouteSegment(null);
+      }
+      if (endpointMapSelectionRef.current?.segmentIndex === segmentIndex) {
+        clearEndpointMapSelection();
+      }
+    },
+    [clearEndpointMapSelection, focusRouteSegment, hiddenRouteSegmentIndexSet, selectedRouteSegmentIndex]
+  );
 
   const addManualRouteDraftPoint = useCallback((coordinate: GpxCoordinate) => {
     const currentPoints = manualRouteDraftRef.current;
@@ -583,6 +706,7 @@ export function GpsTrackingView({
       const gpxCoordinates: [number, number][] = [];
       waypointMarkersRef.current = {};
       routeLinesRef.current = {};
+      routeBoundaryMarkersRef.current = [];
       routeEndpointMarkersRef.current = [];
       visibleRouteSegments.forEach((segment) => {
         const coordinates = segment.points.map(
@@ -590,7 +714,7 @@ export function GpsTrackingView({
         );
         const color = routeSegmentColor(segment.index, segmentColors);
         const segmentLabel = segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index);
-        const segmentDepartureTime = segmentDetails[segment.index]?.departureTime;
+        const segmentDetail = segmentDetails[segment.index];
         allCoordinates.push(...coordinates);
         gpxCoordinates.push(...coordinates);
         const routeLine = leaflet
@@ -601,7 +725,7 @@ export function GpsTrackingView({
             lineCap: "round",
             lineJoin: "round"
           })
-          .bindTooltip(tooltipText(`${segmentLabel}${departureCopy(segmentDepartureTime)}`))
+          .bindTooltip(tooltipText(`${segmentLabel}${segmentScheduleCopy(segmentDetail)}`))
           .addTo(activeMap);
         routeLinesRef.current[segment.index] = routeLine;
 
@@ -699,7 +823,7 @@ export function GpsTrackingView({
       const firstPoint = gpxCoordinates.at(0);
       const lastPoint = gpxCoordinates.at(-1);
       if (firstPoint) {
-        leaflet
+        const marker = leaflet
           .marker(firstPoint, {
             interactive: false,
             icon: leaflet.divIcon({
@@ -715,9 +839,10 @@ export function GpsTrackingView({
             )
           )
           .addTo(activeMap);
+        routeBoundaryMarkersRef.current.push({ segmentIndex: firstSegmentIndex, marker });
       }
       if (lastPoint) {
-        leaflet
+        const marker = leaflet
           .marker(lastPoint, {
             interactive: false,
             icon: leaflet.divIcon({
@@ -729,10 +854,11 @@ export function GpsTrackingView({
           })
           .bindTooltip(
             tooltipText(
-              `Fim do arquivo GPX · ${lastSegmentLabel}${departureCopy(segmentDetails[lastSegmentIndex]?.departureTime)}`
+              `Fim do arquivo GPX · ${lastSegmentLabel}${arrivalCopy(segmentDetails[lastSegmentIndex]?.arrivalTime)}`
             )
           )
           .addTo(activeMap);
+        routeBoundaryMarkersRef.current.push({ segmentIndex: lastSegmentIndex, marker });
       }
 
       route.waypoints.forEach((point, index) => {
@@ -745,7 +871,7 @@ export function GpsTrackingView({
         const segmentLabel =
           segmentIndex === undefined
             ? ""
-            : ` · ${segmentDisplayLabels[segmentIndex] ?? routeSegmentLabel(segmentIndex)}${departureCopy(segmentDetails[segmentIndex]?.departureTime)}`;
+            : ` · ${segmentDisplayLabels[segmentIndex] ?? routeSegmentLabel(segmentIndex)}${segmentScheduleCopy(segmentDetails[segmentIndex])}`;
         const editedPosition = pointPositionEditsRef.current[point.id];
         const markerPosition = editedPosition ?? point;
         const waypointMarker = leaflet
@@ -829,6 +955,7 @@ export function GpsTrackingView({
       map?.remove();
       waypointMarkersRef.current = {};
       routeLinesRef.current = {};
+      routeBoundaryMarkersRef.current = [];
       routeEndpointMarkersRef.current = [];
       manualRouteDraftLineRef.current = null;
       manualRoutePreviewLineRef.current = null;
@@ -956,21 +1083,41 @@ export function GpsTrackingView({
     const selectedSegmentIndex = selectedRouteSegmentIndex;
     Object.entries(routeLinesRef.current).forEach(([rawSegmentIndex, routeLine]) => {
       const segmentIndex = Number(rawSegmentIndex);
+      const isVisible = !hiddenRouteSegmentIndexSet.has(segmentIndex);
+      if (!isVisible) {
+        routeLine.remove();
+        return;
+      }
+
+      if (!map.hasLayer(routeLine)) routeLine.addTo(map);
       const isSelected = selectedSegmentIndex === segmentIndex;
       routeLine.setStyle({
         weight: selectedSegmentIndex === null ? 5 : isSelected ? 9 : 3,
         opacity: selectedSegmentIndex === null ? 0.9 : isSelected ? 1 : 0.2
       });
     });
-    if (selectedSegmentIndex !== null) {
+    if (
+      selectedSegmentIndex !== null &&
+      !hiddenRouteSegmentIndexSet.has(selectedSegmentIndex)
+    ) {
       routeLinesRef.current[selectedSegmentIndex]?.bringToFront();
     }
+
+    routeBoundaryMarkersRef.current.forEach(({ segmentIndex, marker }) => {
+      if (hiddenRouteSegmentIndexSet.has(segmentIndex)) {
+        marker.remove();
+      } else if (!map.hasLayer(marker)) {
+        marker.addTo(map);
+      }
+    });
 
     routeEndpointMarkersRef.current.forEach((marker) => marker.remove());
     routeEndpointMarkersRef.current = [];
 
     const pointsById = new globalThis.Map(route.waypoints.map((point) => [point.id, point]));
     visibleRouteSegments.forEach((segment) => {
+      if (hiddenRouteSegmentIndexSet.has(segment.index)) return;
+
       const endpoints = segmentEndpoints[segment.index] ?? {};
       const isSelected = selectedSegmentIndex === segment.index;
       const endpointEntries: Array<[SegmentEndpointSide, string | undefined]> = [
@@ -986,7 +1133,10 @@ export function GpsTrackingView({
 
         const endpointName = side === "start" ? "Início" : "Fim";
         const segmentLabel = segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index);
-        const segmentDepartureTime = segmentDetails[segment.index]?.departureTime;
+        const endpointTime =
+          side === "start"
+            ? departureCopy(segmentDetails[segment.index]?.departureTime)
+            : arrivalCopy(segmentDetails[segment.index]?.arrivalTime);
         const label = endpointName;
         const marker = leaflet
           .marker([point.latitude, point.longitude], {
@@ -999,7 +1149,7 @@ export function GpsTrackingView({
             zIndexOffset: isSelected ? 700 : 500
           })
           .bindTooltip(
-            tooltipText(`${endpointName} ${isSelected ? "da rota em primeiro plano" : "definido"} · ${segmentLabel}${departureCopy(segmentDepartureTime)}${assignedPoint ? ` · ${assignedPoint.name}` : ""}`)
+            tooltipText(`${endpointName} ${isSelected ? "da rota em primeiro plano" : "definido"} · ${segmentLabel}${endpointTime}${assignedPoint ? ` · ${assignedPoint.name}` : ""}`)
           )
           .addTo(map);
         routeEndpointMarkersRef.current.push(marker);
@@ -1010,7 +1160,7 @@ export function GpsTrackingView({
       routeEndpointMarkersRef.current.forEach((marker) => marker.remove());
       routeEndpointMarkersRef.current = [];
     };
-  }, [mapReady, route.waypoints, segmentColors, segmentDetails, segmentEndpoints, segmentDisplayLabels, selectedRouteSegmentIndex, visibleRouteSegments]);
+  }, [hiddenRouteSegmentIndexSet, mapReady, route.waypoints, segmentColors, segmentDetails, segmentEndpoints, segmentDisplayLabels, selectedRouteSegmentIndex, visibleRouteSegments]);
 
   useEffect(() => stopTracking, [stopTracking]);
 
@@ -1097,7 +1247,7 @@ export function GpsTrackingView({
             )}
             {selectedRouteSegmentIndex !== null && !endpointMapSelection && (
               <span className="gps-route-focus-hint" role="status">
-                {segmentDisplayLabels[selectedRouteSegmentIndex] ?? routeSegmentLabel(selectedRouteSegmentIndex)}{departureCopy(segmentDetails[selectedRouteSegmentIndex]?.departureTime)} em primeiro plano — início e fim visíveis.
+                {segmentDisplayLabels[selectedRouteSegmentIndex] ?? routeSegmentLabel(selectedRouteSegmentIndex)}{segmentScheduleCopy(segmentDetails[selectedRouteSegmentIndex])} em primeiro plano — início e fim visíveis.
               </span>
             )}
             <div className="gps-map-edit-controls">
@@ -1255,12 +1405,13 @@ export function GpsTrackingView({
                 <span>{visibleRouteSegments.length} trechos</span>
               </div>
               <p>
-                Defina o nome e a saída planejada do trecho, depois escolha os pontos de início/fim.
-                Se não existir um ponto, marque-o diretamente na linha da rota.
+                Marque os trechos que devem aparecer no mapa. Em cada início, defina a saída;
+                em cada fim, defina a chegada. Se não existir um ponto, marque-o diretamente na linha.
               </p>
               <ol>
                 {visibleRouteSegments.map((segment) => {
                   const endpoints = segmentEndpoints[segment.index] ?? {};
+                  const isSegmentVisible = !hiddenRouteSegmentIndexSet.has(segment.index);
                   const isMarkingStart =
                     endpointMapSelection?.segmentIndex === segment.index &&
                     endpointMapSelection.side === "start";
@@ -1270,84 +1421,50 @@ export function GpsTrackingView({
 
                   return (
                     <li
-                      className={`gps-recording-item${selectedRouteSegmentIndex === segment.index ? " is-selected" : ""}`}
+                      className={`gps-recording-item${isSegmentVisible ? " is-visible" : ""}${selectedRouteSegmentIndex === segment.index ? " is-selected" : ""}`}
                       key={segment.index}
                     >
-                      <label className="gps-segment-color-control">
-                        <span className="visually-hidden">Escolher a cor de {segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index)}</span>
-                        <input
-                          type="color"
-                          value={routeSegmentColor(segment.index, segmentColors)}
-                          onChange={(event) => onChangeSegmentColor(segment.index, event.target.value)}
-                        />
-                      </label>
-                      <div>
-                        <strong>{segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index)}</strong>
-                        <span>
-                          Gravação: {formatRecordingTime(segment.timing.startTime)} → {formatRecordingTime(segment.timing.endTime)}
-                        </span>
-                        <SegmentDetailsForm
-                          key={`${segment.index}:${segmentDetails[segment.index]?.name ?? ""}:${segmentDetails[segment.index]?.departureTime ?? ""}`}
-                          segmentIndex={segment.index}
-                          detail={segmentDetails[segment.index]}
-                          disabled={isEditingPoints}
-                          onSave={(detail) => onSaveSegmentDetails(segment.index, detail)}
-                        />
-                        <div className="gps-segment-endpoint-controls">
-                          <label className="gps-segment-endpoint-field">
-                            <span>Início</span>
-                            <select
-                              value={endpoints.startPointId ?? ""}
-                              disabled={isEditingPoints}
-                              onChange={(event) =>
-                                onAssignSegmentEndpoint(segment.index, "start", event.target.value || null)
-                              }
-                            >
-                              <option value="">Usar início da gravação</option>
-                              {route.waypoints.map((point, pointIndex) => (
-                                <option key={point.id} value={point.id}>
-                                  {pointIndex + 1}. {point.name}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <button
-                            className={`gps-mark-endpoint-button ${isMarkingStart ? "is-active" : ""}`}
-                            type="button"
-                            disabled={!mapReady || isEditingPoints}
-                            aria-pressed={isMarkingStart}
-                            onClick={() => selectSegmentEndpointOnMap(segment.index, "start")}
-                          >
-                            <MapPinned size={12} /> {isMarkingStart ? "Clique na linha" : "Marcar na linha"}
-                          </button>
-                          <label className="gps-segment-endpoint-field">
-                            <span>Fim</span>
-                            <select
-                              value={endpoints.endPointId ?? ""}
-                              disabled={isEditingPoints}
-                              onChange={(event) =>
-                                onAssignSegmentEndpoint(segment.index, "end", event.target.value || null)
-                              }
-                            >
-                              <option value="">Usar fim da gravação</option>
-                              {route.waypoints.map((point, pointIndex) => (
-                                <option key={point.id} value={point.id}>
-                                  {pointIndex + 1}. {point.name}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <button
-                            className={`gps-mark-endpoint-button ${isMarkingEnd ? "is-active" : ""}`}
-                            type="button"
-                            disabled={!mapReady || isEditingPoints}
-                            aria-pressed={isMarkingEnd}
-                            onClick={() => selectSegmentEndpointOnMap(segment.index, "end")}
-                          >
-                            <MapPinned size={12} /> {isMarkingEnd ? "Clique na linha" : "Marcar na linha"}
-                          </button>
-                        </div>
+                      <div className="gps-segment-item-header">
+                        <label className="gps-segment-color-control">
+                          <span className="visually-hidden">Escolher a cor de {segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index)}</span>
+                          <input
+                            type="color"
+                            value={routeSegmentColor(segment.index, segmentColors)}
+                            onChange={(event) => onChangeSegmentColor(segment.index, event.target.value)}
+                          />
+                        </label>
+                        <button
+                          className="gps-segment-visibility-toggle"
+                          type="button"
+                          aria-pressed={isSegmentVisible}
+                          onClick={() => toggleRouteSegmentVisibility(segment.index)}
+                        >
+                          {isSegmentVisible ? <Eye size={14} /> : <EyeOff size={14} />}
+                          <span>
+                            <strong>{segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index)}</strong>
+                            <small>{isSegmentVisible ? "Exibido no mapa" : "Oculto no mapa"}</small>
+                          </span>
+                        </button>
                       </div>
+                      <span className="gps-segment-recording-time">
+                        Gravação: {formatRecordingTime(segment.timing.startTime)} → {formatRecordingTime(segment.timing.endTime)}
+                      </span>
+                      <SegmentDetailsForm
+                        key={`${segment.index}:${segmentDetails[segment.index]?.name ?? ""}:${segmentDetails[segment.index]?.departureTime ?? ""}:${segmentDetails[segment.index]?.arrivalTime ?? ""}`}
+                        segmentIndex={segment.index}
+                        detail={segmentDetails[segment.index]}
+                        endpoints={endpoints}
+                        waypoints={route.waypoints}
+                        disabled={isEditingPoints}
+                        canMarkEndpoints={mapReady && !isEditingPoints}
+                        isMarkingStart={isMarkingStart}
+                        isMarkingEnd={isMarkingEnd}
+                        onSave={(detail) => onSaveSegmentDetails(segment.index, detail)}
+                        onAssignEndpoint={(side, pointId) =>
+                          onAssignSegmentEndpoint(segment.index, side, pointId)
+                        }
+                        onMarkEndpoint={(side) => selectSegmentEndpointOnMap(segment.index, side)}
+                      />
                     </li>
                   );
                 })}
