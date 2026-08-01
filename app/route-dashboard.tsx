@@ -904,6 +904,11 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     setModalOpen(true);
   }
 
+  function openManualRouteConfig(routeId: string) {
+    const route = routes.find((item) => item.id === routeId);
+    if (route && isValidManualPath(route.manualPath)) openEditRoute(route);
+  }
+
   function createManualRouteFromMap(points: GpxCoordinate[]) {
     const manualPath = points
       .filter(isValidGpsCoordinate)
@@ -912,7 +917,6 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
 
     setDraft({ ...emptyRoute(), stops: [], manualPath });
     setGpsFocusPointId(null);
-    setViewMode("routes");
     setModalOpen(true);
   }
 
@@ -1603,6 +1607,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           onSavePointPositions={saveGpsPointPositions}
           onChangeSegmentColor={saveGpsSegmentColor}
           onChangeManualRouteColor={saveManualRouteColor}
+          onEditManualRoute={openManualRouteConfig}
           onSaveSegmentDetails={saveGpsSegmentDetails}
           onAssignSegmentEndpoint={saveGpsSegmentEndpoint}
           onCreateSegmentEndpoint={addGpsSegmentEndpointFromMap}
@@ -1612,6 +1617,17 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
             setGpsFocusPointId(null);
           }}
         />
+        {modalOpen && draft && (
+          <RouteModal
+            draft={draft}
+            setDraft={setDraft}
+            onClose={() => {
+              setModalOpen(false);
+              setDraft(null);
+            }}
+            onSave={saveRoute}
+          />
+        )}
         {gpsPointDraft && (
           <GpsPointConfigModal
             point={gpsPointDraft.point}

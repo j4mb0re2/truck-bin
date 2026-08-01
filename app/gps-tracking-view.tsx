@@ -256,6 +256,7 @@ export function GpsTrackingView({
   onSavePointPositions,
   onChangeSegmentColor,
   onChangeManualRouteColor,
+  onEditManualRoute,
   onSaveSegmentDetails,
   onAssignSegmentEndpoint,
   onCreateSegmentEndpoint,
@@ -275,6 +276,7 @@ export function GpsTrackingView({
   onSavePointPositions: (positions: Record<string, GpxCoordinate>) => void;
   onChangeSegmentColor: (segmentIndex: number, color: string) => void;
   onChangeManualRouteColor: (routeId: string, color: string) => void;
+  onEditManualRoute: (routeId: string) => void;
   onSaveSegmentDetails: (segmentIndex: number, detail: RouteSegmentDetail) => void;
   onAssignSegmentEndpoint: (
     segmentIndex: number,
@@ -1635,6 +1637,13 @@ export function GpsTrackingView({
                       <span className="gps-segment-recording-time">
                         Saída: {manualRoute.departure} → Chegada: {manualRoute.arrivalForecast}
                       </span>
+                      <button
+                        className="gps-edit-manual-route-button"
+                        type="button"
+                        onClick={() => onEditManualRoute(manualRoute.id)}
+                      >
+                        <Pencil size={12} /> Configurar rota
+                      </button>
                     </li>
                   );
                 })}
