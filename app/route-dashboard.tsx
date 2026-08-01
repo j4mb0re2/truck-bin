@@ -13,7 +13,7 @@ import {
   Fuel,
   FileJson,
   GripVertical,
-  Map,
+  Map as MapIcon,
   MapPin,
   Menu,
   MoreHorizontal,
@@ -31,10 +31,14 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GpsTrackingView } from "./gps-tracking-view";
+import type { ManualMapRoute } from "./gps-tracking-view";
 import type { GpxCoordinate, GpxRouteData, GpxWaypoint } from "../lib/gpx-route";
 import {
+  getRenderedRouteSegments,
   isRouteSegmentColor,
-  isRouteSegmentDepartureTime
+  isRouteSegmentDepartureTime,
+  routeSegmentColor,
+  routeSegmentDisplayLabel
 } from "../lib/route-segment-utils";
 import type {
   RouteSegmentColors,
@@ -59,11 +63,6 @@ type RouteStop = {
 
 type FuelStop = {
   locationUrl: string;
-};
-
-type FixedPoints = {
-  departurePointUrl: string;
-  arrivalPointUrl: string;
 };
 
 type TruckRoute = {
@@ -143,7 +142,6 @@ type GpsPointDragSession = {
 };
 
 const STORAGE_KEY = "roteiro-truck-routes-v1";
-const FIXED_POINTS_KEY = "roteiro-truck-fixed-points-v1";
 const GPS_POINT_CONFIGS_KEY = "roteiro-truck-gps-point-configs-v1";
 const GPS_POINTS_KEY = "roteiro-truck-gps-points-v1";
 const BACKUP_VERSION = 11;
@@ -341,24 +339,6 @@ function migrateRoute(value: unknown): TruckRoute | null {
     manualSetup: isValidManualRouteSetup(legacy.manualSetup)
       ? { ...legacy.manualSetup }
       : undefined
-  };
-}
-
-function isValidFixedPoints(value: unknown): value is FixedPoints {
-  if (!value || typeof value !== "object") return false;
-  const points = value as Partial<FixedPoints>;
-  return (
-    typeof points.departurePointUrl === "string" &&
-    typeof points.arrivalPointUrl === "string"
-  );
-}
-
-function getLegacyFixedPoints(value: unknown): FixedPoints {
-  if (!Array.isArray(value)) return { departurePointUrl: "", arrivalPointUrl: "" };
-  const first = value[0] as { departurePointUrl?: unknown; arrivalPointUrl?: unknown } | undefined;
-  return {
-    departurePointUrl: typeof first?.departurePointUrl === "string" ? first.departurePointUrl : "",
-    arrivalPointUrl: typeof first?.arrivalPointUrl === "string" ? first.arrivalPointUrl : ""
   };
 }
 
@@ -783,11 +763,6 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState<TruckRoute | null>(null);
   const [mobileMenu, setMobileMenu] = useState(false);
-  const [fixedPoints, setFixedPoints] = useState<FixedPoints>({
-    departurePointUrl: "",
-    arrivalPointUrl: ""
-  });
-  const [pointsOpen, setPointsOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
   const [backupMessage, setBackupMessage] = useState<BackupMessage | null>(null);
   const [viewMode, setViewMode] = useState<"routes" | "gps">("routes");
@@ -820,7 +795,6 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
 
     updateClock();
     const stored = window.localStorage.getItem(STORAGE_KEY);
-    const storedPoints = window.localStorage.getItem(FIXED_POINTS_KEY);
     const storedGpsPointConfigs = window.localStorage.getItem(GPS_POINT_CONFIGS_KEY);
     const storedGpsPoints = window.localStorage.getItem(GPS_POINTS_KEY);
     const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
@@ -829,14 +803,6 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       initial = stored ? normalizeRoutes(JSON.parse(stored)) ?? [] : makeDemoRoutes(currentMinutes);
     } catch {
       initial = makeDemoRoutes(currentMinutes);
-    }
-    let initialPoints: FixedPoints;
-    try {
-      initialPoints = storedPoints && isValidFixedPoints(JSON.parse(storedPoints))
-        ? JSON.parse(storedPoints)
-        : getLegacyFixedPoints(stored ? JSON.parse(stored) : null);
-    } catch {
-      initialPoints = { departurePointUrl: "", arrivalPointUrl: "" };
     }
     let initialGpsPointConfigs: GpsPointConfigs = {};
     try {
@@ -856,7 +822,6 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     }
     const hydrationFrame = window.requestAnimationFrame(() => {
       setRoutes(initial);
-      setFixedPoints(initialPoints);
       setGpsPointConfigs(initialGpsPointConfigs);
       setGpsPointCatalog(initialGpsPointCatalog);
       setSelectedId(
@@ -876,11 +841,10 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
   useEffect(() => {
     if (ready) {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(routes));
-      window.localStorage.setItem(FIXED_POINTS_KEY, JSON.stringify(fixedPoints));
       window.localStorage.setItem(GPS_POINT_CONFIGS_KEY, JSON.stringify(gpsPointConfigs));
       window.localStorage.setItem(GPS_POINTS_KEY, JSON.stringify(gpsPointCatalog));
     }
-  }, [fixedPoints, gpsPointCatalog, gpsPointConfigs, ready, routes]);
+  }, [gpsPointCatalog, gpsPointConfigs, ready, routes]);
 
   const counts = useMemo(() => {
     return routes.reduce(
@@ -1049,14 +1013,6 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
   function addFuelStop(route: TruckRoute) {
     setDraft({ ...route, fuelStop: { locationUrl: "" } });
     setModalOpen(true);
-  }
-
-  function saveFixedPoints(points: FixedPoints) {
-    setFixedPoints({
-      departurePointUrl: points.departurePointUrl.trim(),
-      arrivalPointUrl: points.arrivalPointUrl.trim()
-    });
-    setPointsOpen(false);
   }
 
   function openGps(pointId: string | null = null) {
@@ -1650,7 +1606,6 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       app: "Roteiro",
       version: BACKUP_VERSION,
       exportedAt: new Date().toISOString(),
-      fixedPoints,
       gpsPointCatalog,
       gpsPointConfigs,
       routes
@@ -1700,12 +1655,6 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
         stops: route.stops.map((stop) => ({ ...stop }))
       }));
       setRoutes(clonedRoutes);
-      const importedPoints =
-        parsed && typeof parsed === "object" && "fixedPoints" in parsed &&
-        isValidFixedPoints((parsed as { fixedPoints: unknown }).fixedPoints)
-          ? (parsed as { fixedPoints: FixedPoints }).fixedPoints
-          : getLegacyFixedPoints(importedRoutes);
-      setFixedPoints(importedPoints);
       const importedGpsPointConfigs =
         parsed && typeof parsed === "object" && "gpsPointConfigs" in parsed
           ? normalizeGpsPointConfigs((parsed as { gpsPointConfigs: unknown }).gpsPointConfigs)
@@ -1921,7 +1870,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
 
         <nav className="main-nav" aria-label="Navegação principal">
           <button className={`nav-item ${!navigationMode ? "active" : ""}`} type="button" onClick={() => { setNavigationMode(false); setViewMode("routes"); setMobileMenu(false); }}>
-            <Map size={19} />
+            <MapIcon size={19} />
             Minhas rotas
             <span className="nav-count">{routes.length}</span>
           </button>
@@ -2060,25 +2009,6 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
               </label>
             </div>
 
-            <div className="fixed-points-card">
-              <div className="fixed-points-icon"><MapPin size={18} /></div>
-              <div>
-                <strong>Pontos fixos da operação</strong>
-                <p>Partida e chegada usadas em todas as rotas.</p>
-              </div>
-              <div className="fixed-points-status">
-                <span className={fixedPoints.departurePointUrl ? "configured" : "missing"}>
-                  {fixedPoints.departurePointUrl ? "Partida configurada" : "Definir partida"}
-                </span>
-                <span className={fixedPoints.arrivalPointUrl ? "configured" : "missing"}>
-                  {fixedPoints.arrivalPointUrl ? "Chegada configurada" : "Definir chegada"}
-                </span>
-              </div>
-              <button type="button" onClick={() => setPointsOpen(true)}>
-                <Pencil size={14} /> Editar
-              </button>
-            </div>
-
             <div className="route-list">
               {!ready ? (
                 <>
@@ -2134,7 +2064,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                 })
               ) : (
                 <div className="empty-state">
-                  <span><Map size={25} /></span>
+                  <span><MapIcon size={25} /></span>
                   <strong>Nenhuma rota encontrada</strong>
                   <p>Crie uma nova rota ou altere os filtros.</p>
                   <button type="button" onClick={openNewRoute}>
@@ -2149,12 +2079,18 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
             {selectedRoute ? (
               <RouteDetail
                 route={selectedRoute}
-                fixedPoints={fixedPoints}
+                gpxRoute={gpxRoute}
+                gpsPointCatalog={gpsPointCatalog}
+                gpsPoints={gpsPoints}
+                manualRoutes={manualRoutesForMap}
                 nowMinutes={nowMinutes}
                 onEdit={() => openEditRoute(selectedRoute)}
                 onOpenGps={() => {
                   setViewMode("gps");
                   setGpsFocusPointId(null);
+                }}
+                onOpenGpsSegment={() => {
+                  setViewMode("gps");
                 }}
                 onStartNavigation={() => startNavigationMode(selectedRoute.id)}
                 onAddFuel={() => addFuelStop(selectedRoute)}
@@ -2196,14 +2132,6 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
         />
       )}
 
-      {pointsOpen && (
-        <FixedPointsModal
-          points={fixedPoints}
-          onClose={() => setPointsOpen(false)}
-          onSave={saveFixedPoints}
-        />
-      )}
-
       {gpsPointDraft && (
         <GpsPointConfigModal
           point={gpsPointDraft.point}
@@ -2227,23 +2155,41 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
 
 function RouteDetail({
   route,
-  fixedPoints,
+  gpxRoute,
+  gpsPointCatalog,
+  gpsPoints,
+  manualRoutes,
   nowMinutes,
   onEdit,
   onOpenGps,
+  onOpenGpsSegment,
   onStartNavigation,
   onAddFuel,
   onDelete
 }: {
   route: TruckRoute;
-  fixedPoints: FixedPoints;
+  gpxRoute: GpxRouteData;
+  gpsPointCatalog: GpsPointCatalog;
+  gpsPoints: ResolvedGpsPoint[];
+  manualRoutes: ManualMapRoute[];
   nowMinutes: number;
   onEdit: () => void;
   onOpenGps: () => void;
+  onOpenGpsSegment: (segmentIndex: number) => void;
   onStartNavigation: () => void;
   onAddFuel: () => void;
   onDelete: () => void;
 }) {
+  const renderedSegments = useMemo(
+    () => getRenderedRouteSegments(gpxRoute.segments, gpxRoute.segmentTimings),
+    [gpxRoute.segments, gpxRoute.segmentTimings]
+  );
+
+  const pointsById = useMemo(
+    () => new Map(gpsPoints.map((point) => [point.id, point])),
+    [gpsPoints]
+  );
+
   if (isValidManualPath(route.manualPath)) {
     const setup = route.manualSetup;
 
@@ -2305,18 +2251,6 @@ function RouteDetail({
             {statusCopy[status].label}
           </span>
           <h2>{route.name}</h2>
-          {fixedPoints.arrivalPointUrl ? (
-            <a
-              className="location-link"
-              href={fixedPoints.arrivalPointUrl}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <MapPin size={14} /> Abrir chegada no Google Maps <ExternalLink size={12} />
-            </a>
-          ) : (
-            <p><MapPin size={14} /> Localização não informada</p>
-          )}
         </div>
         <div className="icon-actions">
           <button type="button" aria-label="Editar rota" onClick={onEdit}>
@@ -2348,6 +2282,75 @@ function RouteDetail({
         <Navigation size={18} /> Iniciar Modo Navegação GPS
       </button>
 
+      {/* Trechos e Segmentos GPX Integrados */}
+      <div className="route-segments-section">
+        <div className="journey-header">
+          <h3>Trechos e Traçados da Rota (GPS)</h3>
+          <span>Segmentos mapeados e pontos no mapa</span>
+        </div>
+
+        <div className="route-segments-list">
+          {renderedSegments.length > 0 ? (
+            renderedSegments.map((segment) => {
+              const color = routeSegmentColor(segment.index, gpsPointCatalog.segmentColors);
+              const label = routeSegmentDisplayLabel(segment.index, gpsPointCatalog.segmentDetails);
+              const detail = gpsPointCatalog.segmentDetails[segment.index];
+              const endpoint = gpsPointCatalog.segmentEndpoints[segment.index];
+
+              const startPoint = endpoint?.startPointId ? pointsById.get(endpoint.startPointId) : null;
+              const endPoint = endpoint?.endPointId ? pointsById.get(endpoint.endPointId) : null;
+
+              return (
+                <div key={segment.index} className="route-segment-item">
+                  <div className="segment-color-bar" style={{ backgroundColor: color }} />
+                  <div className="segment-info">
+                    <strong>{label}</strong>
+                    <small>
+                      {startPoint ? `Início: ${startPoint.name}` : "Gravação GPX"}
+                      {endPoint ? ` → Fim: ${endPoint.name}` : ""}
+                      {detail?.departureTime ? ` · Saída ${detail.departureTime}` : ""}
+                      {detail?.arrivalTime ? ` · Chegada ${detail.arrivalTime}` : ""}
+                    </small>
+                  </div>
+                  <button
+                    type="button"
+                    className="segment-open-button"
+                    onClick={() => onOpenGpsSegment(segment.index)}
+                    title="Ver este trecho no mapa GPS"
+                  >
+                    <MapPin size={13} /> Ver no mapa
+                  </button>
+                </div>
+              );
+            })
+          ) : (
+            <p className="no-segments-note">Nenhum trecho GPX carregado no mapa.</p>
+          )}
+
+          {manualRoutes.map((manual) => (
+            <div key={manual.id} className="route-segment-item manual-item">
+              <div className="segment-color-bar" style={{ backgroundColor: manual.color || "#0f766e" }} />
+              <div className="segment-info">
+                <strong>{manual.name} (Traçado manual)</strong>
+                <small>
+                  {manual.points.length} pontos no mapa
+                  {manual.setup?.departureTime ? ` · Saída ${manual.setup.departureTime}` : ""}
+                  {manual.setup?.arrivalTime ? ` · Chegada ${manual.setup.arrivalTime}` : ""}
+                </small>
+              </div>
+              <button
+                type="button"
+                className="segment-open-button"
+                onClick={onOpenGps}
+                title="Ver esta rota no mapa GPS"
+              >
+                <MapPin size={13} /> Ver no mapa
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="journey-header">
         <h3>Itinerário da rota</h3>
         <span>Na ordem em que será feito</span>
@@ -2358,7 +2361,7 @@ function RouteDetail({
           title="Ponto de partida"
           subtitle="Estacionamento de saída"
           time={route.departure}
-          href={fixedPoints.departurePointUrl}
+          href=""
         />
 
         <div className="itinerary-section-heading">
@@ -2405,7 +2408,7 @@ function RouteDetail({
           title="Ponto de chegada"
           subtitle="Estacionamento de chegada"
           time={route.arrivalForecast}
-          href={fixedPoints.arrivalPointUrl}
+          href=""
           actionLabel={route.fuelStop ? undefined : "Adicionar abastecimento"}
           onAction={route.fuelStop ? undefined : onAddFuel}
           isLast
@@ -3187,84 +3190,6 @@ function GpsPointEditorModal({
             <button className="primary-button" type="submit">
               <Check size={18} /> {draft.isNew ? "Adicionar ponto" : "Salvar ponto"}
             </button>
-          </div>
-        </form>
-      </section>
-    </div>
-  );
-}
-
-function FixedPointsModal({
-  points,
-  onClose,
-  onSave
-}: {
-  points: FixedPoints;
-  onClose: () => void;
-  onSave: (points: FixedPoints) => void;
-}) {
-  const [draft, setDraft] = useState(points);
-
-  function submit(event: React.FormEvent) {
-    event.preventDefault();
-    if (!draft.departurePointUrl.trim() || !draft.arrivalPointUrl.trim()) return;
-    onSave(draft);
-  }
-
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section
-        className="fixed-points-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="fixed-points-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="modal-header">
-          <div>
-            <span className="eyebrow">CONFIGURAÇÃO GLOBAL</span>
-            <h2 id="fixed-points-title">Pontos fixos da operação</h2>
-            <p>Estes estacionamentos serão usados em todas as suas rotas.</p>
-          </div>
-          <button type="button" aria-label="Fechar" onClick={onClose}>
-            <X size={20} />
-          </button>
-        </div>
-        <form onSubmit={submit}>
-          <div className="fixed-points-content">
-            <label className="field">
-              <span>Ponto de partida — estacionamento do caminhão</span>
-              <div className="input-icon">
-                <Truck size={16} />
-                <input
-                  type="url"
-                  required
-                  value={draft.departurePointUrl}
-                  onChange={(event) => setDraft((current) => ({ ...current, departurePointUrl: event.target.value }))}
-                  placeholder="Cole o link do Google Maps da partida"
-                />
-              </div>
-            </label>
-            <label className="field">
-              <span>Ponto de chegada — estacionamento do caminhão</span>
-              <div className="input-icon">
-                <MapPin size={16} />
-                <input
-                  type="url"
-                  required
-                  value={draft.arrivalPointUrl}
-                  onChange={(event) => setDraft((current) => ({ ...current, arrivalPointUrl: event.target.value }))}
-                  placeholder="Cole o link do Google Maps da chegada"
-                />
-              </div>
-            </label>
-            <p className="fixed-points-note">
-              Alterar estes links atualiza a partida e a chegada de todas as rotas, sem mudar seus horários ou etapas.
-            </p>
-          </div>
-          <div className="modal-footer">
-            <button className="secondary-button" type="button" onClick={onClose}>Cancelar</button>
-            <button className="primary-button" type="submit"><Check size={18} /> Salvar pontos fixos</button>
           </div>
         </form>
       </section>

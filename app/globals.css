@@ -4124,3 +4124,90 @@ button {
   box-shadow: 0 12px 35px rgba(239, 68, 68, 0.5);
   background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
 }
+
+/* Integrated Route Segments in Minhas Rotas */
+.route-segments-section {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.route-segments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.route-segment-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  transition: all 0.15s ease;
+}
+
+.route-segment-item:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.segment-color-bar {
+  width: 5px;
+  height: 28px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.segment-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.segment-info strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.segment-info small {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.segment-open-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.segment-open-button:hover {
+  background: #0284c7;
+  border-color: #0284c7;
+  color: #ffffff;
+}
+
+.no-segments-note {
+  font-size: 12px;
+  color: #94a3b8;
+  font-style: italic;
+  margin: 4px 0;
+}

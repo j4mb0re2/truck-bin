@@ -61,7 +61,7 @@ type ManualRouteSetup = {
   departureTime?: string;
   arrivalTime?: string;
 };
-type ManualMapRoute = {
+export type ManualMapRoute = {
   id: string;
   name: string;
   color?: string;
