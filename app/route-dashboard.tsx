@@ -29,15 +29,11 @@ import {
   X
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
 import { GpsTrackingView } from "./gps-tracking-view";
 import type { GpxCoordinate, GpxRouteData, GpxWaypoint } from "../lib/gpx-route";
 import {
   isRouteSegmentColor,
-  isRouteSegmentDepartureTime,
-  matchPointToRouteSegment,
-  routeSegmentColor,
-  routeSegmentDisplayLabel
+  isRouteSegmentDepartureTime
 } from "../lib/route-segment-utils";
 import type {
   RouteSegmentColors,
@@ -91,6 +87,7 @@ type GpsPointDraft = GpsPointConfig & {
 };
 type GpsPointCatalog = {
   pointOrder: string[];
+  removedPointIds: string[];
   pointNames: Record<string, string>;
   manualPoints: GpxWaypoint[];
   pointCoordinates: Record<string, GpxCoordinate>;
@@ -100,7 +97,7 @@ type GpsPointCatalog = {
 };
 type GpsPointSourceCatalog = Pick<
   GpsPointCatalog,
-  "manualPoints" | "pointCoordinates" | "pointNames" | "pointOrder"
+  "manualPoints" | "pointCoordinates" | "pointNames" | "pointOrder" | "removedPointIds"
 >;
 type ResolvedGpsPoint = GpxWaypoint & {
   source: "gpx" | "manual";
@@ -131,9 +128,10 @@ const STORAGE_KEY = "roteiro-truck-routes-v1";
 const FIXED_POINTS_KEY = "roteiro-truck-fixed-points-v1";
 const GPS_POINT_CONFIGS_KEY = "roteiro-truck-gps-point-configs-v1";
 const GPS_POINTS_KEY = "roteiro-truck-gps-points-v1";
-const BACKUP_VERSION = 9;
+const BACKUP_VERSION = 10;
 const EMPTY_GPS_POINT_CATALOG: GpsPointCatalog = {
   pointOrder: [],
+  removedPointIds: [],
   pointNames: {},
   manualPoints: [],
   pointCoordinates: {},
@@ -353,6 +351,15 @@ function normalizeGpsPointCatalog(value: unknown): GpsPointCatalog {
     }).map((point) => ({ ...point }))
     : [];
 
+  const seenRemovedIds = new Set<string>();
+  const removedPointIds = Array.isArray(catalog.removedPointIds)
+    ? catalog.removedPointIds.filter((id): id is string => {
+      if (typeof id !== "string" || !id || seenRemovedIds.has(id)) return false;
+      seenRemovedIds.add(id);
+      return true;
+    })
+    : [];
+
   const pointNames =
     catalog.pointNames &&
     typeof catalog.pointNames === "object" &&
@@ -459,6 +466,7 @@ function normalizeGpsPointCatalog(value: unknown): GpsPointCatalog {
 
   return {
     manualPoints,
+    removedPointIds,
     pointNames,
     pointCoordinates,
     pointOrder,
@@ -469,12 +477,13 @@ function normalizeGpsPointCatalog(value: unknown): GpsPointCatalog {
 }
 
 function getGpsPointOrder(gpxPoints: GpxWaypoint[], catalog: GpsPointSourceCatalog) {
+  const removedPointIdSet = new Set(catalog.removedPointIds);
   const knownIds = Array.from(
     new Set([
       ...gpxPoints.map((point) => point.id),
       ...catalog.manualPoints.map((point) => point.id)
     ])
-  );
+  ).filter((id) => !removedPointIdSet.has(id));
   const knownIdSet = new Set(knownIds);
   const savedOrder = catalog.pointOrder.filter((id) => knownIdSet.has(id));
   const orderedIdSet = new Set(savedOrder);
@@ -486,15 +495,16 @@ function resolveGpsPoints(
   gpxPoints: GpxWaypoint[],
   catalog: GpsPointSourceCatalog
 ): ResolvedGpsPoint[] {
+  const removedPointIdSet = new Set(catalog.removedPointIds);
   const points = [
-    ...gpxPoints.map((point) => ({
+    ...gpxPoints.filter((point) => !removedPointIdSet.has(point.id)).map((point) => ({
       ...point,
       latitude: catalog.pointCoordinates[point.id]?.latitude ?? point.latitude,
       longitude: catalog.pointCoordinates[point.id]?.longitude ?? point.longitude,
       name: catalog.pointNames[point.id]?.trim() || point.name,
       source: "gpx" as const
     })),
-    ...catalog.manualPoints.map((point) => ({
+    ...catalog.manualPoints.filter((point) => !removedPointIdSet.has(point.id)).map((point) => ({
       ...point,
       latitude: catalog.pointCoordinates[point.id]?.latitude ?? point.latitude,
       longitude: catalog.pointCoordinates[point.id]?.longitude ?? point.longitude,
@@ -838,34 +848,21 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       manualPoints: gpsPointCatalog.manualPoints,
       pointCoordinates: gpsPointCatalog.pointCoordinates,
       pointNames: gpsPointCatalog.pointNames,
-      pointOrder: gpsPointCatalog.pointOrder
+      pointOrder: gpsPointCatalog.pointOrder,
+      removedPointIds: gpsPointCatalog.removedPointIds
     }),
     [
       gpsPointCatalog.manualPoints,
       gpsPointCatalog.pointCoordinates,
       gpsPointCatalog.pointNames,
-      gpsPointCatalog.pointOrder
+      gpsPointCatalog.pointOrder,
+      gpsPointCatalog.removedPointIds
     ]
   );
   const gpsPoints = useMemo(
     () => resolveGpsPoints(gpxRoute.waypoints, gpsPointSourceCatalog),
     [gpxRoute.waypoints, gpsPointSourceCatalog]
   );
-
-  const gpsPointSegmentIndexes = useMemo(() => {
-    const segmentIndexes: Record<string, number> = {};
-
-    gpsPoints.forEach((point) => {
-      const segmentIndex = matchPointToRouteSegment(
-        point,
-        gpxRoute.segments,
-        gpxRoute.segmentTimings
-      );
-      if (segmentIndex !== null) segmentIndexes[point.id] = segmentIndex;
-    });
-
-    return segmentIndexes;
-  }, [gpxRoute.segmentTimings, gpxRoute.segments, gpsPoints]);
 
   const gpsRouteForView = useMemo(
     () => ({ ...gpxRoute, waypoints: gpsPoints }),
@@ -1102,6 +1099,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       return {
         ...current,
         manualPoints,
+        removedPointIds: current.removedPointIds.filter((pointId) => pointId !== savedPoint.id),
         pointNames: { ...current.pointNames, [savedPoint.id]: cleanedName },
         pointCoordinates,
         pointOrder,
@@ -1110,6 +1108,61 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     });
     setGpsFocusPointId(savedPoint.id);
     setGpsPointEditDraft(null);
+  }
+
+  function removeGpsPoint(point: ResolvedGpsPoint) {
+    const sourceLabel = point.source === "manual" ? "ponto adicionado no mapa" : "marcador do arquivo GPX";
+    if (
+      !window.confirm(
+        `Remover “${point.name}” (${sourceLabel}) da lista e do mapa? O traçado GPX não será alterado.`
+      )
+    ) {
+      return;
+    }
+
+    setGpsPointCatalog((current) => {
+      const manualPoints =
+        point.source === "manual"
+          ? current.manualPoints.filter((manualPoint) => manualPoint.id !== point.id)
+          : current.manualPoints;
+      const removedPointIds =
+        point.source === "gpx"
+          ? [...new Set([...current.removedPointIds, point.id])]
+          : current.removedPointIds.filter((pointId) => pointId !== point.id);
+      const pointNames = { ...current.pointNames };
+      const pointCoordinates = { ...current.pointCoordinates };
+      delete pointNames[point.id];
+      delete pointCoordinates[point.id];
+      const segmentEndpoints = Object.entries(current.segmentEndpoints).reduce<RouteSegmentEndpoints>(
+        (next, [segmentIndex, savedEndpoints]) => {
+          const endpoints = { ...savedEndpoints };
+          if (endpoints.startPointId === point.id) delete endpoints.startPointId;
+          if (endpoints.endPointId === point.id) delete endpoints.endPointId;
+          if (endpoints.startPointId || endpoints.endPointId) {
+            next[Number(segmentIndex)] = endpoints;
+          }
+          return next;
+        },
+        {}
+      );
+
+      return {
+        ...current,
+        manualPoints,
+        removedPointIds,
+        pointNames,
+        pointCoordinates,
+        pointOrder: current.pointOrder.filter((pointId) => pointId !== point.id),
+        segmentEndpoints
+      };
+    });
+    setGpsPointConfigs((current) => {
+      const remainingConfigs = { ...current };
+      delete remainingConfigs[point.id];
+      return remainingConfigs;
+    });
+    setGpsFocusPointId((current) => (current === point.id ? null : current));
+    setGpsPointEditDraft((current) => (current?.point.id === point.id ? null : current));
   }
 
   function saveGpsPointPositions(changes: Record<string, GpxCoordinate>) {
@@ -1396,13 +1449,127 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     }
   }
 
+  const gpsPointsPanel = (
+    <aside className="gps-points-panel panel" aria-labelledby="gps-points-title">
+      <div className="gps-points-heading">
+        <div className="gps-points-icon"><MapPin size={18} /></div>
+        <div>
+          <h2 id="gps-points-title">Pontos no mapa</h2>
+          <p>{gpsPoints.length} {gpsPoints.length === 1 ? "ponto" : "pontos"} inseridos</p>
+        </div>
+      </div>
+      <p className="gps-points-note">
+        Segure ⠿ para ordenar. Remover tira apenas o marcador: o traçado GPX continua igual.
+      </p>
+      {gpsPoints.length ? (
+        <div className="gpx-points-list gps-map-points-list" role="list">
+          {gpsPoints.map((point, index) => {
+            const config = gpsPointConfigs[point.id];
+            const isDraggingPoint = gpsPointDrag?.activeId === point.id;
+            const isDropTarget = Boolean(
+              gpsPointDrag &&
+              gpsPointDrag.overId === point.id &&
+              gpsPointDrag.activeId !== point.id
+            );
+            const pointDetail = gpsPointScheduleLabel(
+              config,
+              waypointTimeLabel(point.time, point.description)
+            );
+
+            return (
+              <div
+                className={`gpx-point-row${isDraggingPoint ? " is-dragging" : ""}${isDropTarget ? " is-drop-target" : ""}${gpsFocusPointId === point.id ? " is-focused" : ""}`}
+                key={point.id}
+                data-gps-point-id={point.id}
+                ref={(node) => {
+                  gpsPointRowsRef.current[point.id] = node;
+                }}
+                role="listitem"
+              >
+                <button
+                  className="gpx-point-open"
+                  type="button"
+                  onClick={() => setGpsFocusPointId(point.id)}
+                  aria-label={`Centralizar ${point.name} no mapa GPS`}
+                >
+                  <span>{index + 1}</span>
+                  <div>
+                    <strong>{point.name}</strong>
+                    <small>
+                      {pointDetail}
+                      {point.source === "manual" ? " · adicionado no mapa" : ""}
+                    </small>
+                  </div>
+                  <MapPin size={14} />
+                </button>
+                <div className="gpx-point-actions">
+                  <button
+                    className="gpx-point-drag-handle"
+                    type="button"
+                    disabled={!ready}
+                    aria-label={`Segure e arraste ${point.name} para mudar a posição`}
+                    title="Segure e arraste para reorganizar"
+                    onPointerDown={(event) => startGpsPointDrag(event, point.id)}
+                    onPointerMove={handleGpsPointDragMove}
+                    onPointerUp={finishGpsPointDrag}
+                    onPointerCancel={cancelGpsPointDrag}
+                    onLostPointerCapture={cancelGpsPointDrag}
+                    onClick={(event) => event.preventDefault()}
+                    onContextMenu={(event) => event.preventDefault()}
+                  >
+                    <GripVertical size={14} />
+                  </button>
+                  <button
+                    className="gpx-point-edit"
+                    type="button"
+                    aria-label={`Editar nome e número de ${point.name}`}
+                    title="Editar nome e número"
+                    onClick={() => openGpsPointEditor(point)}
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button
+                    className="gpx-point-configure"
+                    type="button"
+                    onClick={() => openGpsPointConfig(point)}
+                  >
+                    <Clock3 size={12} />
+                    {gpsPointStepCounts[point.id]
+                      ? `${gpsPointStepCounts[point.id]} ${gpsPointStepCounts[point.id] === 1 ? "etapa" : "etapas"}`
+                      : config?.startTime || config?.arrivalTime
+                        ? "Editar horários"
+                        : "Configurar etapas"}
+                  </button>
+                  <button
+                    className="gpx-point-delete"
+                    type="button"
+                    aria-label={`Remover ${point.name} do mapa`}
+                    title="Remover marcador do mapa"
+                    onClick={() => removeGpsPoint(point)}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="gps-points-empty">
+          <MapPin size={18} />
+          <span>Nenhum marcador visível. Use “Adicionar ponto” no mapa quando precisar.</span>
+        </div>
+      )}
+    </aside>
+  );
+
   if (viewMode === "gps") {
     return (
       <>
         <GpsTrackingView
           route={gpsRouteForView}
           pointStepCounts={gpsPointStepCounts}
-          pointSegmentIndexes={gpsPointSegmentIndexes}
+          pointsPanel={gpsPointsPanel}
           segmentColors={gpsPointCatalog.segmentColors}
           segmentDetails={gpsPointCatalog.segmentDetails}
           segmentEndpoints={gpsPointCatalog.segmentEndpoints}
@@ -1421,6 +1588,14 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
             setGpsFocusPointId(null);
           }}
         />
+        {gpsPointDraft && (
+          <GpsPointConfigModal
+            point={gpsPointDraft.point}
+            initialConfig={gpsPointDraft}
+            onClose={() => setGpsPointDraft(null)}
+            onSave={(config) => saveGpsPointConfig(gpsPointDraft.point.id, config)}
+          />
+        )}
         {gpsPointEditDraft && (
           <GpsPointEditorModal
             draft={gpsPointEditDraft}
@@ -1597,126 +1772,6 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                 <Pencil size={14} /> Editar
               </button>
             </div>
-
-            {gpsPoints.length > 0 && (
-              <div className="gpx-points-card">
-                <div className="gpx-points-heading">
-                  <div className="gpx-points-icon"><Satellite size={16} /></div>
-                  <div>
-                    <strong>Pontos da rota GPS</strong>
-                    <p>{gpsPoints.length} marcadores · Segure ⠿ e arraste para ordenar</p>
-                  </div>
-                  <button type="button" onClick={() => openGps()}>
-                    Ver mapa
-                  </button>
-                </div>
-                <div className="gpx-points-list">
-                  {gpsPoints.map((point, index) => {
-                    const config = gpsPointConfigs[point.id];
-                    const segmentIndex = gpsPointSegmentIndexes[point.id];
-                    const segmentColor =
-                      segmentIndex === undefined
-                        ? undefined
-                        : routeSegmentColor(segmentIndex, gpsPointCatalog.segmentColors);
-                    const segmentLabel =
-                      segmentIndex === undefined
-                        ? ""
-                        : routeSegmentDisplayLabel(segmentIndex, gpsPointCatalog.segmentDetails);
-                    const segmentDepartureTime =
-                      segmentIndex === undefined
-                        ? ""
-                        : gpsPointCatalog.segmentDetails[segmentIndex]?.departureTime ?? "";
-                    const segmentArrivalTime =
-                      segmentIndex === undefined
-                        ? ""
-                        : gpsPointCatalog.segmentDetails[segmentIndex]?.arrivalTime ?? "";
-                    const segmentSchedule = [
-                      segmentDepartureTime ? `Saída ${segmentDepartureTime}` : "",
-                      segmentArrivalTime ? `Chegada ${segmentArrivalTime}` : ""
-                    ].filter(Boolean).join(" · ");
-                    const isDraggingPoint = gpsPointDrag?.activeId === point.id;
-                    const isDropTarget = Boolean(
-                      gpsPointDrag &&
-                      gpsPointDrag.overId === point.id &&
-                      gpsPointDrag.activeId !== point.id
-                    );
-                    return (
-                      <div
-                        className={`gpx-point-row${segmentColor ? " has-route-segment" : ""}${isDraggingPoint ? " is-dragging" : ""}${isDropTarget ? " is-drop-target" : ""}`}
-                        key={point.id}
-                        data-gps-point-id={point.id}
-                        style={
-                          segmentColor
-                            ? ({ "--route-point-color": segmentColor } as CSSProperties)
-                            : undefined
-                        }
-                        ref={(node) => {
-                          gpsPointRowsRef.current[point.id] = node;
-                        }}
-                      >
-                        <button
-                          className="gpx-point-open"
-                          type="button"
-                          onClick={() => openGps(point.id)}
-                          aria-label={`Abrir ${point.name}${segmentLabel ? `, ${segmentLabel}` : ""} no mapa GPS`}
-                        >
-                          <span title={segmentLabel || undefined}>{index + 1}</span>
-                          <div>
-                            <strong>{point.name}</strong>
-                            <small>
-                              {segmentLabel
-                                ? `${segmentLabel}${segmentSchedule ? ` · ${segmentSchedule}` : ""} · `
-                                : ""}
-                              {gpsPointScheduleLabel(config, waypointTimeLabel(point.time, point.description))}
-                            </small>
-                          </div>
-                          <MapPin size={14} />
-                        </button>
-                        <div className="gpx-point-actions">
-                          <button
-                            className="gpx-point-drag-handle"
-                            type="button"
-                            disabled={!ready}
-                            aria-label={`Segure e arraste ${point.name} para mudar a posição`}
-                            title="Segure e arraste para reorganizar"
-                            onPointerDown={(event) => startGpsPointDrag(event, point.id)}
-                            onPointerMove={handleGpsPointDragMove}
-                            onPointerUp={finishGpsPointDrag}
-                            onPointerCancel={cancelGpsPointDrag}
-                            onLostPointerCapture={cancelGpsPointDrag}
-                            onClick={(event) => event.preventDefault()}
-                            onContextMenu={(event) => event.preventDefault()}
-                          >
-                            <GripVertical size={14} />
-                          </button>
-                          <button
-                            className="gpx-point-edit"
-                            type="button"
-                            aria-label={`Editar nome e número de ${point.name}`}
-                            title="Editar nome e número"
-                            onClick={() => openGpsPointEditor(point)}
-                          >
-                            <Pencil size={12} />
-                          </button>
-                          <button
-                            className="gpx-point-configure"
-                            type="button"
-                            onClick={() => openGpsPointConfig(point)}
-                          >
-                            <Clock3 size={12} />
-                            {gpsPointStepCounts[point.id]
-                              ? `${gpsPointStepCounts[point.id]} ${gpsPointStepCounts[point.id] === 1 ? "etapa" : "etapas"}`
-                              : config?.startTime || config?.arrivalTime
-                                ? "Editar horários"
-                                : "Configurar etapas"}
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
 
             <div className="route-list">
               {!ready ? (

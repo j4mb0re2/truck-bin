@@ -18,6 +18,7 @@ import {
   X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { GpxCoordinate, GpxRouteData } from "../lib/gpx-route";
 import {
   closestCoordinateOnPolyline,
@@ -241,7 +242,7 @@ function SegmentDetailsForm({
 export function GpsTrackingView({
   route,
   pointStepCounts,
-  pointSegmentIndexes,
+  pointsPanel,
   segmentColors,
   segmentDetails,
   segmentEndpoints,
@@ -259,7 +260,7 @@ export function GpsTrackingView({
 }: {
   route: GpxRouteData;
   pointStepCounts: Record<string, number>;
-  pointSegmentIndexes: Record<string, number>;
+  pointsPanel: ReactNode;
   segmentColors: RouteSegmentColors;
   segmentDetails: RouteSegmentDetails;
   segmentEndpoints: RouteSegmentEndpoints;
@@ -874,30 +875,21 @@ export function GpsTrackingView({
 
       route.waypoints.forEach((point, index) => {
         const stepCount = pointStepCounts[point.id] ?? 0;
-        const segmentIndex = pointSegmentIndexes[point.id];
-        const segmentColor =
-          segmentIndex === undefined
-            ? undefined
-            : routeSegmentColor(segmentIndex, segmentColors);
-        const segmentLabel =
-          segmentIndex === undefined
-            ? ""
-            : ` · ${segmentDisplayLabels[segmentIndex] ?? routeSegmentLabel(segmentIndex)}${segmentScheduleCopy(segmentDetails[segmentIndex])}`;
         const editedPosition = pointPositionEditsRef.current[point.id];
         const markerPosition = editedPosition ?? point;
         const waypointMarker = leaflet
           .marker([markerPosition.latitude, markerPosition.longitude], {
             draggable: false,
             icon: leaflet.divIcon({
-              className: `gps-waypoint-marker${segmentColor ? " has-route-segment" : ""}${point.id === initialWaypointId ? " is-focused" : ""}${stepCount ? " has-steps" : ""}`,
-              html: `<span${segmentColor ? ` style="--route-point-color:${segmentColor}"` : ""}>${index + 1}</span>`,
+              className: `gps-waypoint-marker${point.id === initialWaypointId ? " is-focused" : ""}${stepCount ? " has-steps" : ""}`,
+              html: `<span>${index + 1}</span>`,
               iconSize: [28, 28],
               iconAnchor: [14, 14]
             })
           })
           .bindTooltip(
             tooltipText(
-              `${point.name}${segmentLabel} · ${formatWaypointTime(point.time, point.description)}${stepCount ? ` · ${stepCount} etapa${stepCount === 1 ? "" : "s"}` : ""}`
+              `${point.name} · ${formatWaypointTime(point.time, point.description)}${stepCount ? ` · ${stepCount} etapa${stepCount === 1 ? "" : "s"}` : ""}`
             )
           )
           .addTo(activeMap);
@@ -985,7 +977,6 @@ export function GpsTrackingView({
     initialWaypointId,
     addManualRouteDraftPoint,
     manualRoutes,
-    pointSegmentIndexes,
     pointStepCounts,
     route,
     segmentColors,
@@ -1230,6 +1221,7 @@ export function GpsTrackingView({
       </header>
 
       <section className="gps-layout">
+        {pointsPanel}
         <div className="gps-map-panel panel">
           <div className="gps-map-toolbar">
             <span className="gps-map-label">
