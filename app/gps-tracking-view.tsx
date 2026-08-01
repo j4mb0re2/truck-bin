@@ -21,6 +21,7 @@ import {
   closestCoordinateOnPolyline,
   getRenderedRouteSegments,
   routeSegmentColor,
+  routeSegmentDisplayLabel,
   routeSegmentLabel
 } from "../lib/route-segment-utils";
 import type {
@@ -190,6 +191,15 @@ export function GpsTrackingView({
   const visibleRouteSegments = useMemo(
     () => getRenderedRouteSegments(route.segments, route.segmentTimings),
     [route.segmentTimings, route.segments]
+  );
+  const segmentDisplayLabels = useMemo(
+    () => Object.fromEntries(
+      visibleRouteSegments.map((segment) => [
+        segment.index,
+        routeSegmentDisplayLabel(segment.index, segmentEndpoints, route.waypoints)
+      ])
+    ) as Record<number, string>,
+    [route.waypoints, segmentEndpoints, visibleRouteSegments]
   );
   const manualRoutePointCount = useMemo(
     () => manualRoutes.reduce((total, manualRoute) => total + manualRoute.points.length, 0),
@@ -522,6 +532,7 @@ export function GpsTrackingView({
           (point) => [point.latitude, point.longitude] as [number, number]
         );
         const color = routeSegmentColor(segment.index, segmentColors);
+        const segmentLabel = segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index);
         allCoordinates.push(...coordinates);
         gpxCoordinates.push(...coordinates);
         const routeLine = leaflet
@@ -532,6 +543,7 @@ export function GpsTrackingView({
             lineCap: "round",
             lineJoin: "round"
           })
+          .bindTooltip(tooltipText(segmentLabel))
           .addTo(activeMap);
         routeLinesRef.current[segment.index] = routeLine;
 
@@ -633,7 +645,11 @@ export function GpsTrackingView({
               iconAnchor: [29, 15]
             })
           })
-          .bindTooltip(tooltipText(`Início do arquivo GPX · ${routeSegmentLabel(firstSegment?.index ?? 0)}`))
+          .bindTooltip(
+            tooltipText(
+              `Início do arquivo GPX · ${segmentDisplayLabels[firstSegment?.index ?? 0] ?? routeSegmentLabel(firstSegment?.index ?? 0)}`
+            )
+          )
           .addTo(activeMap);
       }
       if (lastPoint) {
@@ -647,7 +663,11 @@ export function GpsTrackingView({
               iconAnchor: [23, 15]
             })
           })
-          .bindTooltip(tooltipText(`Fim do arquivo GPX · ${routeSegmentLabel(lastSegment?.index ?? 0)}`))
+          .bindTooltip(
+            tooltipText(
+              `Fim do arquivo GPX · ${segmentDisplayLabels[lastSegment?.index ?? 0] ?? routeSegmentLabel(lastSegment?.index ?? 0)}`
+            )
+          )
           .addTo(activeMap);
       }
 
@@ -659,7 +679,9 @@ export function GpsTrackingView({
             ? undefined
             : routeSegmentColor(segmentIndex, segmentColors);
         const segmentLabel =
-          segmentIndex === undefined ? "" : ` · ${routeSegmentLabel(segmentIndex)}`;
+          segmentIndex === undefined
+            ? ""
+            : ` · ${segmentDisplayLabels[segmentIndex] ?? routeSegmentLabel(segmentIndex)}`;
         const editedPosition = pointPositionEditsRef.current[point.id];
         const markerPosition = editedPosition ?? point;
         const waypointMarker = leaflet
@@ -766,6 +788,7 @@ export function GpsTrackingView({
     route,
     segmentColors,
     segmentEndpoints,
+    segmentDisplayLabels,
     focusRouteSegment,
     updateTruckMarker,
     visibleRouteSegments
@@ -897,7 +920,8 @@ export function GpsTrackingView({
         if (!point || (!assignedPoint && !isSelected)) return;
 
         const endpointName = side === "start" ? "Início" : "Fim";
-        const label = `${endpointName} T${segment.index + 1}`;
+        const segmentLabel = segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index);
+        const label = endpointName;
         const marker = leaflet
           .marker([point.latitude, point.longitude], {
             icon: leaflet.divIcon({
@@ -909,7 +933,7 @@ export function GpsTrackingView({
             zIndexOffset: isSelected ? 700 : 500
           })
           .bindTooltip(
-            tooltipText(`${endpointName} ${isSelected ? "do trecho em primeiro plano" : "definido"} · ${routeSegmentLabel(segment.index)}${assignedPoint ? ` · ${assignedPoint.name}` : ""}`)
+            tooltipText(`${endpointName} ${isSelected ? "da rota em primeiro plano" : "definido"} · ${segmentLabel}${assignedPoint ? ` · ${assignedPoint.name}` : ""}`)
           )
           .addTo(map);
         routeEndpointMarkersRef.current.push(marker);
@@ -920,7 +944,7 @@ export function GpsTrackingView({
       routeEndpointMarkersRef.current.forEach((marker) => marker.remove());
       routeEndpointMarkersRef.current = [];
     };
-  }, [mapReady, route.waypoints, segmentColors, segmentEndpoints, selectedRouteSegmentIndex, visibleRouteSegments]);
+  }, [mapReady, route.waypoints, segmentColors, segmentEndpoints, segmentDisplayLabels, selectedRouteSegmentIndex, visibleRouteSegments]);
 
   useEffect(() => stopTracking, [stopTracking]);
 
@@ -1002,12 +1026,12 @@ export function GpsTrackingView({
             )}
             {endpointMapSelection && (
               <span className="gps-endpoint-selection-hint" role="status">
-                Clique na linha do trecho {endpointMapSelection.segmentIndex + 1} para marcar o {endpointMapSelection.side === "start" ? "início" : "fim"}.
+                Clique na linha de {segmentDisplayLabels[endpointMapSelection.segmentIndex] ?? routeSegmentLabel(endpointMapSelection.segmentIndex)} para marcar o {endpointMapSelection.side === "start" ? "início" : "fim"}.
               </span>
             )}
             {selectedRouteSegmentIndex !== null && !endpointMapSelection && (
               <span className="gps-route-focus-hint" role="status">
-                Trecho {selectedRouteSegmentIndex + 1} em primeiro plano — início e fim visíveis.
+                {segmentDisplayLabels[selectedRouteSegmentIndex] ?? routeSegmentLabel(selectedRouteSegmentIndex)} em primeiro plano — início e fim visíveis.
               </span>
             )}
             <div className="gps-map-edit-controls">
@@ -1184,7 +1208,7 @@ export function GpsTrackingView({
                       key={segment.index}
                     >
                       <label className="gps-segment-color-control">
-                        <span className="visually-hidden">Escolher a cor do trecho {segment.index + 1}</span>
+                        <span className="visually-hidden">Escolher a cor de {segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index)}</span>
                         <input
                           type="color"
                           value={routeSegmentColor(segment.index, segmentColors)}
@@ -1192,7 +1216,7 @@ export function GpsTrackingView({
                         />
                       </label>
                       <div>
-                        <strong>Trecho {segment.index + 1}</strong>
+                        <strong>{segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index)}</strong>
                         <span>
                           Gravação: {formatRecordingTime(segment.timing.startTime)} → {formatRecordingTime(segment.timing.endTime)}
                         </span>

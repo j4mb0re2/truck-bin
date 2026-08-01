@@ -57,6 +57,22 @@ export function routeSegmentLabel(index: number) {
   return `Trecho ${index + 1} — retomada após pausa`;
 }
 
+export function routeSegmentDisplayLabel(
+  index: number,
+  segmentEndpoints: RouteSegmentEndpoints = {},
+  points: ReadonlyArray<{ id: string; name: string }> = []
+) {
+  const endpoints = segmentEndpoints[index];
+  if (!endpoints) return routeSegmentLabel(index);
+
+  const pointsById = new Map(points.map((point) => [point.id, point.name.trim()]));
+  const startName = endpoints.startPointId ? pointsById.get(endpoints.startPointId) : "";
+  const endName = endpoints.endPointId ? pointsById.get(endpoints.endPointId) : "";
+
+  if (startName && endName && startName !== endName) return `${startName} → ${endName}`;
+  return startName || endName || routeSegmentLabel(index);
+}
+
 export function getRenderedRouteSegments(
   segments: RouteCoordinate[][],
   segmentTimings: RouteSegmentTiming[] = []

@@ -36,7 +36,7 @@ import {
   isRouteSegmentColor,
   matchPointToRouteSegment,
   routeSegmentColor,
-  routeSegmentLabel
+  routeSegmentDisplayLabel
 } from "../lib/route-segment-utils";
 import type {
   RouteSegmentColors,
@@ -1543,7 +1543,13 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                         ? undefined
                         : routeSegmentColor(segmentIndex, gpsPointCatalog.segmentColors);
                     const segmentLabel =
-                      segmentIndex === undefined ? "" : routeSegmentLabel(segmentIndex);
+                      segmentIndex === undefined
+                        ? ""
+                        : routeSegmentDisplayLabel(
+                          segmentIndex,
+                          gpsPointCatalog.segmentEndpoints,
+                          gpsPoints
+                        );
                     const isDraggingPoint = gpsPointDrag?.activeId === point.id;
                     const isDropTarget = Boolean(
                       gpsPointDrag &&
@@ -1574,7 +1580,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                           <div>
                             <strong>{point.name}</strong>
                             <small>
-                              {segmentIndex === undefined ? "" : `Trecho ${segmentIndex + 1} · `}
+                              {segmentLabel ? `${segmentLabel} · ` : ""}
                               {gpsPointScheduleLabel(config, waypointTimeLabel(point.time, point.description))}
                             </small>
                           </div>
