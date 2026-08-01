@@ -19,10 +19,36 @@ export type RouteSegmentEndpoint = {
 
 export type RouteSegmentEndpoints = Record<number, RouteSegmentEndpoint>;
 
+export type RouteProcedureType =
+  | "inicio"
+  | "carga"
+  | "descarga"
+  | "taiki"
+  | "kiukei"
+  | "fim";
+
+export type RouteSegmentProcedure = {
+  endpointSide: "start" | "end";
+  procedureType: RouteProcedureType;
+};
+
+export const PROCEDURE_CONFIG: Record<
+  RouteProcedureType,
+  { label: string; icon: string; description: string }
+> = {
+  inicio: { label: "Início", icon: "🟢", description: "Início da rota / deslocamento" },
+  carga: { label: "Carga", icon: "📦", description: "Carregamento de produtos / fábrica" },
+  descarga: { label: "Descarga", icon: "🚚", description: "Descarregamento / entrega" },
+  taiki: { label: "Taiki", icon: "🅿️", description: "Estacionamento de espera" },
+  kiukei: { label: "Kiukei", icon: "☕", description: "Pausa para descanso / refeição" },
+  fim: { label: "Fim", icon: "🏁", description: "Fim da rota / encerramento" }
+};
+
 export type RouteSegmentDetail = {
   name?: string;
   departureTime?: string;
   arrivalTime?: string;
+  procedure?: RouteSegmentProcedure;
 };
 
 export type RouteSegmentDetails = Record<number, RouteSegmentDetail>;

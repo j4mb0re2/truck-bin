@@ -34,6 +34,7 @@ import { GpsTrackingView } from "./gps-tracking-view";
 import type { ManualMapRoute } from "./gps-tracking-view";
 import type { GpxCoordinate, GpxRouteData, GpxWaypoint } from "../lib/gpx-route";
 import {
+  PROCEDURE_CONFIG,
   getRenderedRouteSegments,
   isRouteSegmentColor,
   isRouteSegmentDepartureTime,
@@ -45,6 +46,7 @@ import type {
   RouteSegmentDetail,
   RouteSegmentDetails,
   RouteSegmentEndpoints,
+  RouteSegmentProcedure,
   SegmentEndpointSide
 } from "../lib/route-segment-utils";
 
@@ -82,6 +84,7 @@ type ManualRouteSetup = {
   endPointId?: string;
   departureTime?: string;
   arrivalTime?: string;
+  procedure?: RouteSegmentProcedure;
 };
 
 type RouteStatus = "active" | "waiting" | "done";
@@ -152,6 +155,7 @@ export type UnifiedRouteItem = {
   pointCount?: number;
   routeObj?: TruckRoute;
   segmentIndex?: number;
+  procedure?: RouteSegmentProcedure;
 };
 
 const STORAGE_KEY = "roteiro-truck-routes-v1";
@@ -889,7 +893,8 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           departureMinutes: depMins,
           color: route.manualPathColor || "#0d9488",
           pointCount: route.manualPath?.length ?? 0,
-          routeObj: route
+          routeObj: route,
+          procedure: route.manualSetup?.procedure
         });
       } else {
         const depTime = route.departure || "";
@@ -928,7 +933,8 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
         departureMinutes: depMins,
         color,
         pointCount: segment.points.length,
-        segmentIndex: segment.index
+        segmentIndex: segment.index,
+        procedure: detail?.procedure
       });
     });
 
@@ -2146,6 +2152,11 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                             <MapPin size={14} />
                             {item.arrivalTime ? `Chegada prevista às ${item.arrivalTime} · ` : ""}
                             {item.pointCount} pontos no mapa
+                            {item.procedure && (
+                              <em style={{ color: "#0369a1", backgroundColor: "#e0f2fe", fontStyle: "normal", fontWeight: 700 }}>
+                                {PROCEDURE_CONFIG[item.procedure.procedureType].icon} {PROCEDURE_CONFIG[item.procedure.procedureType].label} ({item.procedure.endpointSide === "start" ? "Início" : "Fim"})
+                              </em>
+                            )}
                           </span>
                         </span>
                         <ArrowRight className="route-arrow" size={18} />
@@ -2182,6 +2193,11 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                           )}
                           {item.kind === "manual-route" && (
                             <em>Traçado manual</em>
+                          )}
+                          {item.procedure && (
+                            <em style={{ color: "#0369a1", backgroundColor: "#e0f2fe", fontStyle: "normal", fontWeight: 700 }}>
+                              {PROCEDURE_CONFIG[item.procedure.procedureType].icon} {PROCEDURE_CONFIG[item.procedure.procedureType].label} ({item.procedure.endpointSide === "start" ? "Início" : "Fim"})
+                            </em>
                           )}
                         </span>
                         <span className="progress-row">

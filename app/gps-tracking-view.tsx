@@ -2,6 +2,7 @@
 
 import {
   ArrowLeft,
+  ClipboardList,
   Crosshair,
   Eye,
   EyeOff,
@@ -23,6 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { GpxCoordinate, GpxRouteData } from "../lib/gpx-route";
 import {
+  PROCEDURE_CONFIG,
   closestCoordinateOnPolyline,
   getRenderedRouteSegments,
   routeSegmentColor,
@@ -30,10 +32,12 @@ import {
   routeSegmentLabel
 } from "../lib/route-segment-utils";
 import type {
+  RouteProcedureType,
   RouteSegmentColors,
   RouteSegmentDetail,
   RouteSegmentDetails,
   RouteSegmentEndpoints,
+  RouteSegmentProcedure,
   SegmentEndpointSide
 } from "../lib/route-segment-utils";
 
@@ -69,6 +73,7 @@ type ManualRouteSetup = {
   endPointId?: string;
   departureTime?: string;
   arrivalTime?: string;
+  procedure?: RouteSegmentProcedure;
 };
 export type ManualMapRoute = {
   id: string;
@@ -151,7 +156,8 @@ function SegmentDetailsForm({
   isMarkingEnd,
   onSave,
   onAssignEndpoint,
-  onMarkEndpoint
+  onMarkEndpoint,
+  onOpenProcedureModal
 }: {
   segmentIndex: number;
   detail: RouteSegmentDetail | undefined;
@@ -164,6 +170,7 @@ function SegmentDetailsForm({
   onSave: (detail: RouteSegmentDetail) => void;
   onAssignEndpoint: (side: SegmentEndpointSide, pointId: string | null) => void;
   onMarkEndpoint: (side: SegmentEndpointSide) => void;
+  onOpenProcedureModal?: () => void;
 }) {
   const [name, setName] = useState(() => detail?.name ?? "");
   const [departureTime, setDepartureTime] = useState(() => detail?.departureTime ?? "");
@@ -171,7 +178,7 @@ function SegmentDetailsForm({
 
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onSave({ name, departureTime, arrivalTime });
+    onSave({ name, departureTime, arrivalTime, procedure: detail?.procedure });
   }
 
   return (
@@ -262,9 +269,30 @@ function SegmentDetailsForm({
           </label>
         </section>
       </div>
-      <button className="gps-save-segment-details-button" type="submit" disabled={disabled}>
-        <Save size={12} /> Salvar trecho
-      </button>
+      <div className="gps-segment-procedure-bar">
+        {detail?.procedure && (
+          <div className="gps-procedure-badge">
+            <span className="proc-icon">{PROCEDURE_CONFIG[detail.procedure.procedureType].icon}</span>
+            <span>
+              <strong>{PROCEDURE_CONFIG[detail.procedure.procedureType].label}</strong>
+              <small>({detail.procedure.endpointSide === "start" ? "Início da rota" : "Fim da rota"})</small>
+            </span>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: "6px" }}>
+          <button
+            type="button"
+            className="gps-open-procedure-button"
+            disabled={disabled}
+            onClick={onOpenProcedureModal}
+          >
+            <ClipboardList size={12} /> {detail?.procedure ? "Procedimento" : "Adicionar procedimento"}
+          </button>
+          <button className="gps-save-segment-details-button" type="submit" disabled={disabled} style={{ flex: 1 }}>
+            <Save size={12} /> Salvar trecho
+          </button>
+        </div>
+      </div>
     </form>
   );
 }
@@ -278,6 +306,7 @@ function ManualRouteDetailsForm({
   isMarkingStart,
   isMarkingEnd,
   onMarkEndpoint,
+  onOpenProcedureModal,
   onSave
 }: {
   routeName: string;
@@ -288,6 +317,7 @@ function ManualRouteDetailsForm({
   isMarkingStart: boolean;
   isMarkingEnd: boolean;
   onMarkEndpoint: (side: SegmentEndpointSide) => void;
+  onOpenProcedureModal?: () => void;
   onSave: (name: string, setup: ManualRouteSetup) => void;
 }) {
   const [name, setName] = useState(() => routeName);
@@ -302,7 +332,8 @@ function ManualRouteDetailsForm({
       startPointId: startPointId || undefined,
       endPointId: endPointId || undefined,
       departureTime,
-      arrivalTime
+      arrivalTime,
+      procedure: setup.procedure
     });
   }
 
@@ -394,9 +425,30 @@ function ManualRouteDetailsForm({
           </label>
         </section>
       </div>
-      <button className="gps-save-segment-details-button" type="submit" disabled={disabled}>
-        <Save size={12} /> Salvar pontos e horários
-      </button>
+      <div className="gps-segment-procedure-bar">
+        {setup?.procedure && (
+          <div className="gps-procedure-badge">
+            <span className="proc-icon">{PROCEDURE_CONFIG[setup.procedure.procedureType].icon}</span>
+            <span>
+              <strong>{PROCEDURE_CONFIG[setup.procedure.procedureType].label}</strong>
+              <small>({setup.procedure.endpointSide === "start" ? "Início da rota" : "Fim da rota"})</small>
+            </span>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: "6px" }}>
+          <button
+            type="button"
+            className="gps-open-procedure-button"
+            disabled={disabled}
+            onClick={onOpenProcedureModal}
+          >
+            <ClipboardList size={12} /> {setup?.procedure ? "Procedimento" : "Adicionar procedimento"}
+          </button>
+          <button className="gps-save-segment-details-button" type="submit" disabled={disabled} style={{ flex: 1 }}>
+            <Save size={12} /> Salvar pontos e horários
+          </button>
+        </div>
+      </div>
     </form>
   );
 }
@@ -523,6 +575,34 @@ export function GpsTrackingView({
   const [hiddenManualRouteIds, setHiddenManualRouteIds] = useState<string[]>([]);
   const [isDrawingManualRoute, setIsDrawingManualRoute] = useState(false);
   const [manualRouteDraft, setManualRouteDraft] = useState<GpxCoordinate[]>([]);
+  const [procedureModalTarget, setProcedureModalTarget] = useState<
+    | { kind: "segment"; segmentIndex: number; title: string; currentProcedure?: RouteSegmentProcedure }
+    | { kind: "manual-route"; routeId: string; title: string; currentProcedure?: RouteSegmentProcedure }
+    | null
+  >(null);
+
+  function handleSaveProcedure(procedure: RouteSegmentProcedure | null) {
+    if (!procedureModalTarget) return;
+
+    if (procedureModalTarget.kind === "segment") {
+      const existing = segmentDetails[procedureModalTarget.segmentIndex] ?? {};
+      const updated: RouteSegmentDetail = {
+        ...existing,
+        procedure: procedure ?? undefined
+      };
+      onSaveSegmentDetails(procedureModalTarget.segmentIndex, updated);
+    } else if (procedureModalTarget.kind === "manual-route") {
+      const targetRoute = manualRoutes.find((r) => r.id === procedureModalTarget.routeId);
+      if (targetRoute) {
+        const nextSetup: ManualRouteSetup = {
+          ...targetRoute.setup,
+          procedure: procedure ?? undefined
+        };
+        onSaveManualRouteSetup(targetRoute.id, targetRoute.name, nextSetup);
+      }
+    }
+    setProcedureModalTarget(null);
+  }
 
   useEffect(() => {
     onAddPointRef.current = onAddPoint;
@@ -2136,6 +2216,14 @@ export function GpsTrackingView({
                           onAssignSegmentEndpoint(segment.index, side, pointId)
                         }
                         onMarkEndpoint={(side) => selectSegmentEndpointOnMap(segment.index, side)}
+                        onOpenProcedureModal={() =>
+                          setProcedureModalTarget({
+                            kind: "segment",
+                            segmentIndex: segment.index,
+                            title: segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index),
+                            currentProcedure: segmentDetails[segment.index]?.procedure
+                          })
+                        }
                       />
                     </li>
                   );
@@ -2202,6 +2290,14 @@ export function GpsTrackingView({
                         onSave={(name, nextSetup) =>
                           onSaveManualRouteSetup(manualRoute.id, name, nextSetup)
                         }
+                        onOpenProcedureModal={() =>
+                          setProcedureModalTarget({
+                            kind: "manual-route",
+                            routeId: manualRoute.id,
+                            title: manualRoute.name,
+                            currentProcedure: setup.procedure
+                          })
+                        }
                       />
                     </li>
                   );
@@ -2215,6 +2311,119 @@ export function GpsTrackingView({
           </p>
         </aside>
       </section>
+
+      {procedureModalTarget && (
+        <SegmentProcedureModal
+          title={procedureModalTarget.title}
+          currentProcedure={procedureModalTarget.currentProcedure}
+          onClose={() => setProcedureModalTarget(null)}
+          onSave={handleSaveProcedure}
+        />
+      )}
     </main>
+  );
+}
+
+export function SegmentProcedureModal({
+  title,
+  currentProcedure,
+  onClose,
+  onSave
+}: {
+  title: string;
+  currentProcedure?: RouteSegmentProcedure;
+  onClose: () => void;
+  onSave: (procedure: RouteSegmentProcedure | null) => void;
+}) {
+  const [side, setSide] = useState<"start" | "end">(currentProcedure?.endpointSide ?? "start");
+  const [procedureType, setProcedureType] = useState<RouteProcedureType>(
+    currentProcedure?.procedureType ?? "carga"
+  );
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className="modal-card procedure-modal">
+        <div className="modal-header">
+          <div>
+            <span className="eyebrow">OPERAÇÃO DE ROTA</span>
+            <h3>Procedimento — {title}</h3>
+          </div>
+          <button type="button" className="close-button" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="modal-body" style={{ padding: "16px 20px" }}>
+          <div className="form-group">
+            <label className="form-label" style={{ fontWeight: 600, display: "block", marginBottom: "8px" }}>
+              Escolha o local do procedimento (Início ou Fim da rota)
+            </label>
+            <div className="procedure-side-selector">
+              <button
+                type="button"
+                className={`side-option ${side === "start" ? "active" : ""}`}
+                onClick={() => setSide("start")}
+              >
+                🚩 Início da rota
+              </button>
+              <button
+                type="button"
+                className={`side-option ${side === "end" ? "active" : ""}`}
+                onClick={() => setSide("end")}
+              >
+                🏁 Fim da rota
+              </button>
+            </div>
+          </div>
+
+          <div className="form-group" style={{ marginTop: "18px" }}>
+            <label className="form-label" style={{ fontWeight: 600, display: "block", marginBottom: "8px" }}>
+              Selecione o procedimento
+            </label>
+            <div className="procedure-type-grid">
+              {(Object.keys(PROCEDURE_CONFIG) as RouteProcedureType[]).map((type) => {
+                const config = PROCEDURE_CONFIG[type];
+                const isSelected = procedureType === type;
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    className={`procedure-type-card ${isSelected ? "selected" : ""}`}
+                    onClick={() => setProcedureType(type)}
+                  >
+                    <span className="proc-icon">{config.icon}</span>
+                    <strong>{config.label}</strong>
+                    <small>{config.description}</small>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="modal-actions" style={{ padding: "12px 20px 16px", display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+          {currentProcedure && (
+            <button
+              type="button"
+              className="secondary-button danger"
+              style={{ marginRight: "auto" }}
+              onClick={() => onSave(null)}
+            >
+              Remover
+            </button>
+          )}
+          <button type="button" className="secondary-button" onClick={onClose}>
+            Cancelar
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => onSave({ endpointSide: side, procedureType })}
+          >
+            💾 Salvar Procedimento
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

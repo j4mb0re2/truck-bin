@@ -4225,3 +4225,146 @@ button {
   font-weight: 800;
   flex-shrink: 0;
 }
+
+/* Procedimento Modal & Badges */
+.procedure-modal {
+  max-width: 480px;
+  width: 92vw;
+}
+
+.procedure-side-selector {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.procedure-side-selector .side-option {
+  flex: 1;
+  padding: 10px 14px;
+  border: 2px solid #e2e8f0;
+  background: #f8fafc;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.procedure-side-selector .side-option:hover {
+  border-color: #cbd5e1;
+  background: #ffffff;
+}
+
+.procedure-side-selector .side-option.active {
+  border-color: #0284c7;
+  background: #f0f9ff;
+  color: #0369a1;
+}
+
+.procedure-type-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.procedure-type-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 12px;
+  border: 2px solid #e2e8f0;
+  background: #ffffff;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.procedure-type-card:hover {
+  border-color: #cbd5e1;
+  transform: translateY(-1px);
+}
+
+.procedure-type-card.selected {
+  border-color: #0284c7;
+  background: #f0f9ff;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.2);
+}
+
+.procedure-type-card .proc-icon {
+  font-size: 20px;
+  margin-bottom: 4px;
+}
+
+.procedure-type-card strong {
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.procedure-type-card small {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.gps-segment-procedure-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.gps-procedure-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #0369a1;
+}
+
+.gps-procedure-badge .proc-icon {
+  font-size: 16px;
+}
+
+.gps-procedure-badge strong {
+  font-weight: 700;
+  color: #0c4a6e;
+}
+
+.gps-procedure-badge small {
+  color: #0284c7;
+  margin-left: 4px;
+}
+
+.gps-open-procedure-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.gps-open-procedure-button:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
