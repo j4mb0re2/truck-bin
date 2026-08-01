@@ -2635,9 +2635,9 @@ button {
   cursor: crosshair !important;
 }
 
-.gps-map.is-selecting-segment-endpoint,
-.gps-map.is-selecting-segment-endpoint .leaflet-container,
-.gps-map.is-selecting-segment-endpoint .leaflet-interactive {
+.gps-map.is-selecting-endpoint,
+.gps-map.is-selecting-endpoint .leaflet-container,
+.gps-map.is-selecting-endpoint .leaflet-interactive {
   cursor: crosshair !important;
 }
 
@@ -2647,7 +2647,7 @@ button {
   cursor: crosshair !important;
 }
 
-.gps-map:not(.is-adding-point):not(.is-drawing-manual-route):not(.is-editing-points):not(.is-selecting-segment-endpoint) .leaflet-overlay-pane {
+.gps-map:not(.is-adding-point):not(.is-drawing-manual-route):not(.is-editing-points):not(.is-selecting-endpoint) .leaflet-overlay-pane {
   cursor: pointer;
 }
 

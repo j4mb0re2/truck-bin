@@ -111,14 +111,22 @@ type GpsPointSourceCatalog = Pick<
 type ResolvedGpsPoint = GpxWaypoint & {
   source: "gpx" | "manual";
 };
+type GpsPointEndpointAssignment =
+  | {
+      kind: "segment";
+      segmentIndex: number;
+      side: SegmentEndpointSide;
+    }
+  | {
+      kind: "manual-route";
+      routeId: string;
+      side: SegmentEndpointSide;
+    };
 type GpsPointEditDraft = {
   point: ResolvedGpsPoint;
   position: number;
   isNew: boolean;
-  endpointAssignment?: {
-    segmentIndex: number;
-    side: SegmentEndpointSide;
-  };
+  endpointAssignment?: GpsPointEndpointAssignment;
 };
 type GpsPointDragState = {
   activeId: string;
@@ -224,6 +232,37 @@ function isValidStop(value: unknown): value is RouteStop {
 
 function isValidManualPath(value: unknown): value is GpxCoordinate[] {
   return Array.isArray(value) && value.length >= 2 && value.every(isValidGpsCoordinate);
+}
+
+function replaceManualPathEndpoint(
+  manualPath: GpxCoordinate[],
+  side: SegmentEndpointSide,
+  coordinate: GpxCoordinate
+) {
+  const nextPath = manualPath.map((point) => ({
+    latitude: point.latitude,
+    longitude: point.longitude
+  }));
+  const endpointIndex = side === "start" ? 0 : nextPath.length - 1;
+  nextPath[endpointIndex] = {
+    latitude: coordinate.latitude,
+    longitude: coordinate.longitude
+  };
+  return nextPath;
+}
+
+function getManualRouteSetup(route: TruckRoute): ManualRouteSetup {
+  const savedSetup = route.manualSetup;
+  return {
+    startPointId: savedSetup?.startPointId,
+    endPointId: savedSetup?.endPointId,
+    departureTime:
+      savedSetup?.departureTime ??
+      (isRouteSegmentDepartureTime(route.departure) ? route.departure : ""),
+    arrivalTime:
+      savedSetup?.arrivalTime ??
+      (isRouteSegmentDepartureTime(route.arrivalForecast) ? route.arrivalForecast : "")
+  };
 }
 
 function isValidManualRouteSetup(value: unknown): value is ManualRouteSetup {
@@ -903,21 +942,11 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       routes.flatMap((route) => {
         if (!isValidManualPath(route.manualPath)) return [];
 
-        const savedSetup = route.manualSetup;
         return [{
           id: route.id,
           name: route.name,
           color: route.manualPathColor,
-          setup: savedSetup
-            ? { ...savedSetup }
-            : {
-              departureTime: isRouteSegmentDepartureTime(route.departure)
-                ? route.departure
-                : "",
-              arrivalTime: isRouteSegmentDepartureTime(route.arrivalForecast)
-                ? route.arrivalForecast
-                : ""
-            },
+          setup: getManualRouteSetup(route),
           points: route.manualPath.map((point) => ({
             latitude: point.latitude,
             longitude: point.longitude
@@ -1115,8 +1144,83 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       point,
       position: gpsPoints.length + 1,
       isNew: true,
-      endpointAssignment: { segmentIndex, side }
+      endpointAssignment: { kind: "segment", segmentIndex, side }
     });
+  }
+
+  function addGpsManualRouteEndpointFromMap(
+    routeId: string,
+    side: SegmentEndpointSide,
+    coordinate: GpxCoordinate
+  ) {
+    const manualRoute = routes.find(
+      (route) => route.id === routeId && isValidManualPath(route.manualPath)
+    );
+    if (
+      !manualRoute ||
+      (side !== "start" && side !== "end") ||
+      !isValidGpsCoordinate(coordinate)
+    ) {
+      return;
+    }
+
+    const endpointLabel = side === "start" ? "Início" : "Fim";
+    const point: ResolvedGpsPoint = {
+      id: `gps-manual-${cryptoId()}`,
+      name: `${endpointLabel} de ${manualRoute.name}`,
+      description: `${endpointLabel} definido no mapa para corrigir a ponta da rota manual`,
+      time: "",
+      latitude: coordinate.latitude,
+      longitude: coordinate.longitude,
+      source: "manual"
+    };
+    setGpsPointEditDraft({
+      point,
+      position: gpsPoints.length + 1,
+      isNew: true,
+      endpointAssignment: { kind: "manual-route", routeId, side }
+    });
+  }
+
+  function saveManualRouteEndpoint(
+    routeId: string,
+    side: SegmentEndpointSide,
+    pointId: string,
+    coordinate: GpxCoordinate
+  ) {
+    if (
+      (side !== "start" && side !== "end") ||
+      !pointId ||
+      !isValidGpsCoordinate(coordinate)
+    ) {
+      return;
+    }
+
+    setRoutes((current) =>
+      current.map((route) => {
+        if (route.id !== routeId || !isValidManualPath(route.manualPath)) return route;
+
+        const manualSetup = {
+          ...getManualRouteSetup(route),
+          [side === "start" ? "startPointId" : "endPointId"]: pointId
+        };
+        return {
+          ...route,
+          manualPath: replaceManualPathEndpoint(route.manualPath, side, coordinate),
+          manualSetup
+        };
+      })
+    );
+  }
+
+  function assignManualRouteEndpoint(
+    routeId: string,
+    side: SegmentEndpointSide,
+    pointId: string
+  ) {
+    const point = gpsPoints.find((item) => item.id === pointId);
+    if (!point) return;
+    saveManualRouteEndpoint(routeId, side, pointId, point);
   }
 
   function saveGpsPointEditor(draftToSave: GpsPointEditDraft, name: string, position: number) {
@@ -1152,7 +1256,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       const segmentEndpoints = { ...current.segmentEndpoints };
       const endpointAssignment = draftToSave.endpointAssignment;
 
-      if (endpointAssignment) {
+      if (endpointAssignment?.kind === "segment") {
         const endpoint = { ...segmentEndpoints[endpointAssignment.segmentIndex] };
         endpoint[endpointAssignment.side === "start" ? "startPointId" : "endPointId"] = savedPoint.id;
         segmentEndpoints[endpointAssignment.segmentIndex] = endpoint;
@@ -1168,6 +1272,14 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
         segmentEndpoints
       };
     });
+    if (draftToSave.endpointAssignment?.kind === "manual-route") {
+      saveManualRouteEndpoint(
+        draftToSave.endpointAssignment.routeId,
+        draftToSave.endpointAssignment.side,
+        savedPoint.id,
+        savedPoint
+      );
+    }
     setGpsFocusPointId(savedPoint.id);
     setGpsPointEditDraft(null);
   }
@@ -1245,20 +1357,47 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
 
   function saveGpsPointPositions(changes: Record<string, GpxCoordinate>) {
     const knownPointIds = new Set(gpsPoints.map((point) => point.id));
+    const validChanges = Object.entries(changes).reduce<Record<string, GpxCoordinate>>(
+      (next, [pointId, coordinate]) => {
+        if (!knownPointIds.has(pointId) || !isValidGpsCoordinate(coordinate)) return next;
+        next[pointId] = {
+          latitude: coordinate.latitude,
+          longitude: coordinate.longitude
+        };
+        return next;
+      },
+      {}
+    );
 
     setGpsPointCatalog((current) => {
       const pointCoordinates = { ...current.pointCoordinates };
 
-      Object.entries(changes).forEach(([pointId, coordinate]) => {
-        if (!knownPointIds.has(pointId) || !isValidGpsCoordinate(coordinate)) return;
-        pointCoordinates[pointId] = {
-          latitude: coordinate.latitude,
-          longitude: coordinate.longitude
-        };
+      Object.entries(validChanges).forEach(([pointId, coordinate]) => {
+        pointCoordinates[pointId] = coordinate;
       });
 
       return { ...current, pointCoordinates };
     });
+    setRoutes((current) =>
+      current.map((route) => {
+        if (!route.manualSetup || !isValidManualPath(route.manualPath)) return route;
+
+        let manualPath = route.manualPath;
+        const startCoordinate = route.manualSetup.startPointId
+          ? validChanges[route.manualSetup.startPointId]
+          : undefined;
+        const endCoordinate = route.manualSetup.endPointId
+          ? validChanges[route.manualSetup.endPointId]
+          : undefined;
+        if (startCoordinate) {
+          manualPath = replaceManualPathEndpoint(manualPath, "start", startCoordinate);
+        }
+        if (endCoordinate) {
+          manualPath = replaceManualPathEndpoint(manualPath, "end", endCoordinate);
+        }
+        return manualPath === route.manualPath ? route : { ...route, manualPath };
+      })
+    );
   }
 
   function saveGpsSegmentColor(segmentIndex: number, color: string) {
@@ -1285,13 +1424,13 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
   }
 
   function saveManualRouteSetup(routeId: string, name: string, setup: ManualRouteSetup) {
-    const knownPointIds = new Set(gpsPoints.map((point) => point.id));
+    const pointsById = new globalThis.Map(gpsPoints.map((point) => [point.id, point]));
     const startPointId =
-      setup.startPointId && knownPointIds.has(setup.startPointId)
+      setup.startPointId && pointsById.has(setup.startPointId)
         ? setup.startPointId
         : undefined;
     const endPointId =
-      setup.endPointId && knownPointIds.has(setup.endPointId)
+      setup.endPointId && pointsById.has(setup.endPointId)
         ? setup.endPointId
         : undefined;
     const departureTime = isRouteSegmentDepartureTime(setup.departureTime)
@@ -1302,17 +1441,23 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       : "";
 
     setRoutes((current) =>
-      current.map((route) =>
-        route.id === routeId && isValidManualPath(route.manualPath)
-          ? {
-            ...route,
-            name: name.trim() || route.name,
-            departure: departureTime || route.departure,
-            arrivalForecast: arrivalTime || route.arrivalForecast,
-            manualSetup: { startPointId, endPointId, departureTime, arrivalTime }
-          }
-          : route
-      )
+      current.map((route) => {
+        if (route.id !== routeId || !isValidManualPath(route.manualPath)) return route;
+
+        let manualPath = route.manualPath;
+        const startPoint = startPointId ? pointsById.get(startPointId) : undefined;
+        const endPoint = endPointId ? pointsById.get(endPointId) : undefined;
+        if (startPoint) manualPath = replaceManualPathEndpoint(manualPath, "start", startPoint);
+        if (endPoint) manualPath = replaceManualPathEndpoint(manualPath, "end", endPoint);
+        return {
+          ...route,
+          name: name.trim() || route.name,
+          departure: departureTime || route.departure,
+          arrivalForecast: arrivalTime || route.arrivalForecast,
+          manualPath,
+          manualSetup: { startPointId, endPointId, departureTime, arrivalTime }
+        };
+      })
     );
   }
 
@@ -1706,6 +1851,8 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           onSaveSegmentDetails={saveGpsSegmentDetails}
           onAssignSegmentEndpoint={saveGpsSegmentEndpoint}
           onCreateSegmentEndpoint={addGpsSegmentEndpointFromMap}
+          onAssignManualRouteEndpoint={assignManualRouteEndpoint}
+          onCreateManualRouteEndpoint={addGpsManualRouteEndpointFromMap}
           onCreateManualRoute={createManualRouteFromMap}
           onBack={() => {
             setViewMode("routes");
@@ -2892,7 +3039,9 @@ function GpsPointEditorModal({
   const [name, setName] = useState(draft.point.name);
   const [position, setPosition] = useState(String(draft.position));
   const endpointLabel = draft.endpointAssignment
-    ? `${draft.endpointAssignment.side === "start" ? "Início" : "Fim"} do trecho ${draft.endpointAssignment.segmentIndex + 1}`
+    ? draft.endpointAssignment.kind === "segment"
+      ? `${draft.endpointAssignment.side === "start" ? "Início" : "Fim"} do trecho ${draft.endpointAssignment.segmentIndex + 1}`
+      : `${draft.endpointAssignment.side === "start" ? "Início" : "Fim"} da rota manual`
     : null;
 
   function submit(event: React.FormEvent) {
@@ -2922,7 +3071,7 @@ function GpsPointEditorModal({
             </h2>
             <p>
               {endpointLabel
-                ? "Dê um nome a este marcador. Ao salvar, ele ficará ligado a este trecho da rota."
+                ? "Dê um nome a este marcador. Ao salvar, ele ficará ligado à rota e corrigirá a ponta do traçado."
                 : draft.isNew
                 ? "Defina o nome e a posição deste novo marcador na sua lista."
                 : "Altere o nome e o número que aparecem no mapa e em Minhas rotas."}
