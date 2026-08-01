@@ -5,6 +5,8 @@ import {
   Crosshair,
   Eye,
   EyeOff,
+  Globe,
+  Layers,
   MapPinned,
   Navigation,
   Pencil,
@@ -466,6 +468,8 @@ export function GpsTrackingView({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
   const leafletRef = useRef<LeafletApi | null>(null);
+  const tileLayerRef = useRef<import("leaflet").TileLayer | null>(null);
+  const [mapLayerType, setMapLayerType] = useState<"streets" | "satellite">("streets");
   const routeBoundsRef = useRef<import("leaflet").LatLngBounds | null>(null);
   const truckMarkerRef = useRef<import("leaflet").Marker | null>(null);
   const accuracyCircleRef = useRef<import("leaflet").Circle | null>(null);
@@ -592,6 +596,37 @@ export function GpsTrackingView({
     setGpsState("idle");
     setGpsMessage("GPS pausado.");
   }, []);
+
+  const toggleMapLayerType = useCallback(() => {
+    const leaflet = leafletRef.current;
+    const map = mapRef.current;
+    if (!leaflet || !map) return;
+
+    const nextType = mapLayerType === "streets" ? "satellite" : "streets";
+    setMapLayerType(nextType);
+
+    if (tileLayerRef.current) {
+      tileLayerRef.current.remove();
+    }
+
+    if (nextType === "satellite") {
+      tileLayerRef.current = leaflet.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        {
+          maxZoom: 19,
+          attribution: "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community"
+        }
+      ).addTo(map);
+    } else {
+      tileLayerRef.current = leaflet.tileLayer(
+        "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        {
+          maxZoom: 19,
+          attribution: "&copy; OpenStreetMap contributors"
+        }
+      ).addTo(map);
+    }
+  }, [mapLayerType]);
 
   const toggleAddPointMode = useCallback(() => {
     if (
@@ -966,12 +1001,13 @@ export function GpsTrackingView({
       const activeMap = map;
       mapRef.current = activeMap;
       leaflet.control.zoom({ position: "bottomright" }).addTo(activeMap);
-      leaflet
+      const initialTileLayer = leaflet
         .tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
           maxZoom: 19,
           attribution: "&copy; OpenStreetMap contributors"
         })
         .addTo(activeMap);
+      tileLayerRef.current = initialTileLayer;
 
       onMapClick = (event) => {
         if (isDrawingManualRouteRef.current) {
@@ -1624,6 +1660,78 @@ export function GpsTrackingView({
   }, [hiddenManualRouteIdSet, mapReady, selectedManualRouteId, selectedRouteSegmentIndex]);
 
   useEffect(() => stopTracking, [stopTracking]);
+
+  if (navigationMode) {
+    return (
+      <main className="gps-page is-navigation-fullscreen">
+        <div className="gps-navigation-hud">
+          <div className="hud-card-main">
+            <div className="hud-route-badge">
+              <Navigation size={15} className="gps-nav-icon-spin" />
+              <span>NAVEGAÇÃO</span>
+            </div>
+            <div className="hud-route-title">
+              <strong>{activeRouteName || "Primeira Rota"}</strong>
+              <span>
+                {gpsState === "tracking"
+                  ? "🟢 GPS Ao Vivo"
+                  : gpsState === "searching"
+                    ? "🟡 Buscando sinal GPS..."
+                    : `🔴 ${gpsMessage}`}
+              </span>
+            </div>
+          </div>
+
+          <div className="hud-controls-group">
+            <button
+              className="hud-button hud-layer-toggle"
+              type="button"
+              onClick={toggleMapLayerType}
+              title="Alternar entre modo Satélite e modo Ruas"
+            >
+              {mapLayerType === "satellite" ? <Layers size={16} /> : <Globe size={16} />}
+              {mapLayerType === "satellite" ? "Modo Ruas" : "Modo Satélite"}
+            </button>
+            <button
+              className="hud-button hud-recenter"
+              type="button"
+              onClick={() => {
+                if (mapRef.current && livePositionRef.current) {
+                  mapRef.current.flyTo(
+                    [livePositionRef.current.latitude, livePositionRef.current.longitude],
+                    16
+                  );
+                } else {
+                  centerRoute();
+                }
+              }}
+              title="Centralizar no caminhão"
+            >
+              <Crosshair size={16} /> Centralizar
+            </button>
+            <button
+              className="hud-button hud-exit"
+              type="button"
+              onClick={onExitNavigation || onBack}
+              title="Sair da Navegação"
+            >
+              <X size={16} /> Sair
+            </button>
+          </div>
+        </div>
+
+        <section className="gps-layout">
+          <div className="gps-map-panel panel">
+            <div
+              className={`gps-map${hasRouteFocus ? " is-focusing-route-segment" : ""}`}
+              ref={mapContainerRef}
+              aria-label="Mapa de Navegação GPS"
+            />
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="gps-page">
