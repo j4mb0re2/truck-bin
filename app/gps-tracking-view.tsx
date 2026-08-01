@@ -789,6 +789,61 @@ export function GpsTrackingView({
     return items;
   }, [visibleRouteSegments, segmentDetails, segmentDisplayLabels, manualRoutes]);
 
+  // Efeito para iniciar automaticamente na Rota 1 no início do dia ou retomar a rota ativa ao reabrir o app
+  useEffect(() => {
+    if (!navigationMode || !sortedAllGpsItems.length) return;
+
+    const savedKey = typeof window !== "undefined" ? localStorage.getItem("truck-bin:active-navigation-key") : null;
+    let targetItem = sortedAllGpsItems.find((item) => {
+      const key = item.kind === "segment" ? `segment-${item.segment.index}` : `manual-${item.manualRoute.id}`;
+      return key === savedKey;
+    });
+
+    // Se não houver rota salva ou não existir na lista, inicia direto na Rota 1 (primeira do dia)
+    if (!targetItem) {
+      targetItem = sortedAllGpsItems[0];
+    }
+
+    const targetKey = targetItem.kind === "segment" ? `segment-${targetItem.segment.index}` : `manual-${targetItem.manualRoute.id}`;
+    try {
+      localStorage.setItem("truck-bin:active-navigation-key", targetKey);
+    } catch {}
+
+    // Deixa visível SOMENTE a rota atual sendo percorrida e oculta todas as outras
+    const allSegmentIndexes = sortedAllGpsItems.filter((i) => i.kind === "segment").map((i) => i.segment.index);
+    const allManualRouteIds = sortedAllGpsItems.filter((i) => i.kind === "manual-route").map((i) => i.manualRoute.id);
+
+    const timer = setTimeout(() => {
+      if (targetItem.kind === "segment") {
+        setHiddenRouteSegmentIndexes(allSegmentIndexes.filter((idx) => idx !== targetItem.segment.index));
+        setHiddenManualRouteIds(allManualRouteIds);
+        setSelectedRouteSegmentIndex(targetItem.segment.index);
+        setSelectedManualRouteId(null);
+      } else {
+        setHiddenManualRouteIds(allManualRouteIds.filter((id) => id !== targetItem.manualRoute.id));
+        setHiddenRouteSegmentIndexes(allSegmentIndexes);
+        setSelectedManualRouteId(targetItem.manualRoute.id);
+        setSelectedRouteSegmentIndex(null);
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [navigationMode, sortedAllGpsItems]);
+
+  const currentActiveNavTitle = useMemo(() => {
+    if (!sortedAllGpsItems.length) return activeRouteName || "Rota 1";
+    const savedKey = typeof window !== "undefined" ? localStorage.getItem("truck-bin:active-navigation-key") : null;
+    const item =
+      sortedAllGpsItems.find((i) => {
+        const k = i.kind === "segment" ? `segment-${i.segment.index}` : `manual-${i.manualRoute.id}`;
+        return k === savedKey;
+      }) || sortedAllGpsItems[0];
+
+    if (!item) return activeRouteName || "Rota 1";
+    return item.kind === "segment"
+      ? segmentDisplayLabels[item.segment.index] ?? routeSegmentLabel(item.segment.index)
+      : item.manualRoute.name;
+  }, [sortedAllGpsItems, segmentDisplayLabels, activeRouteName]);
+
   // Checagem de Geofence: Detecta se o caminhão chegou ao local do procedimento
   useEffect(() => {
     if (!livePosition) return;
@@ -1975,7 +2030,7 @@ export function GpsTrackingView({
               <span>NAVEGAÇÃO</span>
             </div>
             <div className="hud-route-title">
-              <strong>{activeRouteName || "Primeira Rota"}</strong>
+              <strong>{currentActiveNavTitle}</strong>
               <span>
                 {gpsState === "tracking"
                   ? "🟢 GPS Ao Vivo"
@@ -2061,27 +2116,32 @@ export function GpsTrackingView({
       }
     });
 
-    if (currentIndex >= 0) {
-      const currentItem = sortedAllGpsItems[currentIndex];
+    if (currentIndex >= 0 && currentIndex + 1 < sortedAllGpsItems.length) {
+      const nextItem = sortedAllGpsItems[currentIndex + 1];
+      const nextKey = nextItem.kind === "segment" ? `segment-${nextItem.segment.index}` : `manual-${nextItem.manualRoute.id}`;
 
-      // Ocultar o trajeto atual concluído do mapa
-      if (currentItem.kind === "segment") {
-        setHiddenRouteSegmentIndexes((current) => Array.from(new Set([...current, currentItem.segment.index])));
+      try {
+        localStorage.setItem("truck-bin:active-navigation-key", nextKey);
+      } catch {}
+
+      // Deixa visível SOMENTE o próximo trajeto no mapa e oculta o trajeto anterior e os demais
+      const allSegmentIndexes = sortedAllGpsItems.filter((i) => i.kind === "segment").map((i) => i.segment.index);
+      const allManualRouteIds = sortedAllGpsItems.filter((i) => i.kind === "manual-route").map((i) => i.manualRoute.id);
+
+      if (nextItem.kind === "segment") {
+        setHiddenRouteSegmentIndexes(allSegmentIndexes.filter((idx) => idx !== nextItem.segment.index));
+        setHiddenManualRouteIds(allManualRouteIds);
+        focusRouteSegment(nextItem.segment.index);
       } else {
-        setHiddenManualRouteIds((current) => Array.from(new Set([...current, currentItem.manualRoute.id])));
+        setHiddenManualRouteIds(allManualRouteIds.filter((id) => id !== nextItem.manualRoute.id));
+        setHiddenRouteSegmentIndexes(allSegmentIndexes);
+        focusManualRoute(nextItem.manualRoute.id);
       }
-
-      // Avançar visibilidade e foco para o próximo trajeto
-      if (currentIndex + 1 < sortedAllGpsItems.length) {
-        const nextItem = sortedAllGpsItems[currentIndex + 1];
-        if (nextItem.kind === "segment") {
-          setHiddenRouteSegmentIndexes((current) => current.filter((i) => i !== nextItem.segment.index));
-          focusRouteSegment(nextItem.segment.index);
-        } else {
-          setHiddenManualRouteIds((current) => current.filter((id) => id !== nextItem.manualRoute.id));
-          focusManualRoute(nextItem.manualRoute.id);
-        }
-      }
+    } else {
+      // Concluiu todos os trajetos
+      try {
+        localStorage.removeItem("truck-bin:active-navigation-key");
+      } catch {}
     }
 
     setActiveProcedurePopup(null);

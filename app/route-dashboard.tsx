@@ -853,6 +853,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     } catch {
       initialGpsPointCatalog = EMPTY_GPS_POINT_CATALOG;
     }
+    const storedNavMode = window.localStorage.getItem("truck-bin:navigation-mode-active");
     const hydrationFrame = window.requestAnimationFrame(() => {
       setRoutes(initial);
       setGpsPointConfigs(initialGpsPointConfigs);
@@ -862,6 +863,10 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           initial[0]?.id ??
           ""
       );
+      if (storedNavMode === "true") {
+        setNavigationMode(true);
+        setViewMode("gps");
+      }
       setReady(true);
     });
     const timer = window.setInterval(updateClock, 60_000);
@@ -876,8 +881,9 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(routes));
       window.localStorage.setItem(GPS_POINT_CONFIGS_KEY, JSON.stringify(gpsPointConfigs));
       window.localStorage.setItem(GPS_POINTS_KEY, JSON.stringify(gpsPointCatalog));
+      window.localStorage.setItem("truck-bin:navigation-mode-active", navigationMode ? "true" : "false");
     }
-  }, [gpsPointCatalog, gpsPointConfigs, ready, routes]);
+  }, [gpsPointCatalog, gpsPointConfigs, navigationMode, ready, routes]);
 
   const counts = useMemo(() => {
     return routes.reduce(
