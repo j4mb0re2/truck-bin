@@ -2219,7 +2219,8 @@ button {
 
 .gps-edit-points-button,
 .gps-cancel-points-button,
-.gps-save-points-button {
+.gps-save-points-button,
+.gps-clear-route-focus-button {
   min-height: 30px;
   padding: 6px 8px;
   border: 1px solid #cddde3;
@@ -2238,7 +2239,8 @@ button {
 }
 
 .gps-edit-points-button:hover,
-.gps-cancel-points-button:hover {
+.gps-cancel-points-button:hover,
+.gps-clear-route-focus-button:hover {
   color: var(--blue);
   background: #f6fbfd;
   border-color: #a9cddd;
@@ -2281,7 +2283,8 @@ button {
 
 .gps-add-point-hint,
 .gps-edit-points-hint,
-.gps-endpoint-selection-hint {
+.gps-endpoint-selection-hint,
+.gps-route-focus-hint {
   padding: 7px 9px;
   color: #245d86;
   background: rgba(238, 247, 251, 0.96);
@@ -2304,6 +2307,12 @@ button {
   border-color: #ecd1a2;
 }
 
+.gps-route-focus-hint {
+  color: #0d617e;
+  background: rgba(238, 249, 252, 0.97);
+  border-color: #a9d3e0;
+}
+
 .gps-map.is-adding-point,
 .gps-map.is-adding-point .leaflet-container,
 .gps-map.is-adding-point .leaflet-interactive {
@@ -2314,6 +2323,10 @@ button {
 .gps-map.is-selecting-segment-endpoint .leaflet-container,
 .gps-map.is-selecting-segment-endpoint .leaflet-interactive {
   cursor: crosshair !important;
+}
+
+.gps-map:not(.is-adding-point):not(.is-editing-points):not(.is-selecting-segment-endpoint) .leaflet-overlay-pane {
+  cursor: pointer;
 }
 
 .gps-map.is-editing-points .gps-waypoint-marker,
@@ -2558,6 +2571,15 @@ button {
 .gps-recording-item {
   justify-content: space-between;
   align-items: flex-start !important;
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.gps-recording-item.is-selected {
+  padding: 7px;
+  background: #f1fbfd;
+  border: 1px solid #b6dde6;
+  border-radius: 9px;
+  box-shadow: 0 4px 10px rgba(44, 109, 158, 0.08);
 }
 
 .gps-recording-item > div {
@@ -2732,6 +2754,10 @@ button {
   padding: 4px 5px;
   text-align: center;
   font-size: 7px;
+}
+
+.gps-segment-endpoint-marker.is-selected-segment-endpoint > span {
+  box-shadow: 0 0 0 4px rgba(44, 109, 158, 0.16), 0 4px 11px rgba(24, 35, 38, 0.2);
 }
 
 .gps-waypoint-marker > span {
@@ -3201,7 +3227,8 @@ button {
 
   .gps-add-point-hint,
   .gps-edit-points-hint,
-  .gps-endpoint-selection-hint {
+  .gps-endpoint-selection-hint,
+  .gps-route-focus-hint {
     order: 3;
     flex: 1 1 100%;
   }
