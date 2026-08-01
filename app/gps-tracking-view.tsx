@@ -32,6 +32,7 @@ import {
   routeSegmentLabel
 } from "../lib/route-segment-utils";
 import type {
+  RenderedRouteSegment,
   RouteProcedureType,
   RouteSegmentColors,
   RouteSegmentDetail,
@@ -685,27 +686,64 @@ export function GpsTrackingView({
   const selectedManualRoute = manualRoutes.find((manualRoute) => manualRoute.id === selectedManualRouteId);
   const hasRouteFocus = selectedRouteSegmentIndex !== null || selectedManualRouteId !== null;
 
-  const sortedVisibleRouteSegments = useMemo(() => {
-    return [...visibleRouteSegments].sort((a, b) => {
-      const depA = segmentDetails[a.index]?.departureTime || a.timing.startTime || "";
-      const depB = segmentDetails[b.index]?.departureTime || b.timing.startTime || "";
-      const minA = parseTimeToMinutes(depA);
-      const minB = parseTimeToMinutes(depB);
-      if (minA !== minB) return minA - minB;
-      return a.index - b.index;
-    });
-  }, [visibleRouteSegments, segmentDetails]);
+  const sortedAllGpsItems = useMemo(() => {
+    type GpsItem =
+      | {
+          kind: "segment";
+          segment: RenderedRouteSegment;
+          departureTime: string;
+          departureMinutes: number;
+        }
+      | {
+          kind: "manual-route";
+          manualRoute: ManualMapRoute;
+          index: number;
+          departureTime: string;
+          departureMinutes: number;
+        };
 
-  const sortedManualRoutes = useMemo(() => {
-    return [...manualRoutes].sort((a, b) => {
-      const depA = a.setup?.departureTime || "";
-      const depB = b.setup?.departureTime || "";
-      const minA = parseTimeToMinutes(depA);
-      const minB = parseTimeToMinutes(depB);
-      if (minA !== minB) return minA - minB;
-      return a.name.localeCompare(b.name, "pt-BR");
+    const items: GpsItem[] = [];
+
+    visibleRouteSegments.forEach((segment) => {
+      const depTime = segmentDetails[segment.index]?.departureTime || segment.timing.startTime || "";
+      const depMins = parseTimeToMinutes(depTime);
+      items.push({
+        kind: "segment",
+        segment,
+        departureTime: depTime,
+        departureMinutes: depMins
+      });
     });
-  }, [manualRoutes]);
+
+    manualRoutes.forEach((manualRoute, index) => {
+      const depTime = manualRoute.setup?.departureTime || "";
+      const depMins = parseTimeToMinutes(depTime);
+      items.push({
+        kind: "manual-route",
+        manualRoute,
+        index,
+        departureTime: depTime,
+        departureMinutes: depMins
+      });
+    });
+
+    items.sort((a, b) => {
+      if (a.departureMinutes !== b.departureMinutes) {
+        return a.departureMinutes - b.departureMinutes;
+      }
+      const nameA =
+        a.kind === "segment"
+          ? segmentDisplayLabels[a.segment.index] ?? routeSegmentLabel(a.segment.index)
+          : a.manualRoute.name;
+      const nameB =
+        b.kind === "segment"
+          ? segmentDisplayLabels[b.segment.index] ?? routeSegmentLabel(b.segment.index)
+          : b.manualRoute.name;
+      return nameA.localeCompare(nameB, "pt-BR");
+    });
+
+    return items;
+  }, [visibleRouteSegments, segmentDetails, segmentDisplayLabels, manualRoutes]);
 
   const centerRoute = useCallback(() => {
     const map = mapRef.current;
@@ -2175,81 +2213,80 @@ export function GpsTrackingView({
                 desenhadas, escolha os pontos de início e fim e seus horários.
               </p>
               <ol>
-                {sortedVisibleRouteSegments.map((segment) => {
-                  const endpoints = segmentEndpoints[segment.index] ?? {};
-                  const isSegmentVisible = !hiddenRouteSegmentIndexSet.has(segment.index);
-                  const isMarkingStart =
-                    endpointMapSelection?.kind === "segment" &&
-                    endpointMapSelection.segmentIndex === segment.index &&
-                    endpointMapSelection.side === "start";
-                  const isMarkingEnd =
-                    endpointMapSelection?.kind === "segment" &&
-                    endpointMapSelection.segmentIndex === segment.index &&
-                    endpointMapSelection.side === "end";
+                {sortedAllGpsItems.map((item) => {
+                  if (item.kind === "segment") {
+                    const segment = item.segment;
+                    const endpoints = segmentEndpoints[segment.index] ?? {};
+                    const isSegmentVisible = !hiddenRouteSegmentIndexSet.has(segment.index);
+                    const isMarkingStart =
+                      endpointMapSelection?.kind === "segment" &&
+                      endpointMapSelection.segmentIndex === segment.index &&
+                      endpointMapSelection.side === "start";
+                    const isMarkingEnd =
+                      endpointMapSelection?.kind === "segment" &&
+                      endpointMapSelection.segmentIndex === segment.index &&
+                      endpointMapSelection.side === "end";
 
-                  return (
-                    <li
-                      className={`gps-recording-item${isSegmentVisible ? " is-visible" : ""}${selectedRouteSegmentIndex === segment.index ? " is-selected" : ""}`}
-                      key={segment.index}
-                    >
-                      <div className="gps-segment-item-header">
-                        <label className="gps-segment-color-control">
-                          <span className="visually-hidden">Escolher a cor de {segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index)}</span>
-                          <input
-                            type="color"
-                            value={routeSegmentColor(segment.index, segmentColors)}
-                            onChange={(event) => onChangeSegmentColor(segment.index, event.target.value)}
-                          />
-                        </label>
-                        <button
-                          className="gps-segment-visibility-toggle"
-                          type="button"
-                          aria-pressed={isSegmentVisible}
-                          onClick={() => toggleRouteSegmentVisibility(segment.index)}
-                        >
-                          {isSegmentVisible ? <Eye size={14} /> : <EyeOff size={14} />}
-                          <span>
-                            <strong>{segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index)}</strong>
-                            <small>{isSegmentVisible ? "Exibido no mapa" : "Oculto no mapa"}</small>
-                          </span>
-                        </button>
-                      </div>
-                      <span className="gps-segment-recording-time">
-                        Gravação: {formatRecordingTime(segment.timing.startTime)} → {formatRecordingTime(segment.timing.endTime)}
-                      </span>
-                      <SegmentDetailsForm
-                        key={`${segment.index}:${segmentDetails[segment.index]?.name ?? ""}:${segmentDetails[segment.index]?.departureTime ?? ""}:${segmentDetails[segment.index]?.arrivalTime ?? ""}`}
-                        segmentIndex={segment.index}
-                        detail={segmentDetails[segment.index]}
-                        endpoints={endpoints}
-                        waypoints={route.waypoints}
-                        disabled={isEditingPoints}
-                        canMarkEndpoints={mapReady && !isEditingPoints}
-                        isMarkingStart={isMarkingStart}
-                        isMarkingEnd={isMarkingEnd}
-                        onSave={(detail) => onSaveSegmentDetails(segment.index, detail)}
-                        onAssignEndpoint={(side, pointId) =>
-                          onAssignSegmentEndpoint(segment.index, side, pointId)
-                        }
-                        onMarkEndpoint={(side) => selectSegmentEndpointOnMap(segment.index, side)}
-                        onOpenProcedureModal={() =>
-                          setProcedureModalTarget({
-                            kind: "segment",
-                            segmentIndex: segment.index,
-                            title: segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index),
-                            currentProcedure: segmentDetails[segment.index]?.procedure
-                          })
-                        }
-                      />
-                    </li>
-                  );
-                })}
-                {manualRoutes.length > 0 && (
-                  <li className="gps-manual-routes-label" aria-hidden="true">
-                    Rotas desenhadas manualmente
-                  </li>
-                )}
-                {sortedManualRoutes.map((manualRoute, index) => {
+                    return (
+                      <li
+                        className={`gps-recording-item${isSegmentVisible ? " is-visible" : ""}${selectedRouteSegmentIndex === segment.index ? " is-selected" : ""}`}
+                        key={`segment-${segment.index}`}
+                      >
+                        <div className="gps-segment-item-header">
+                          <label className="gps-segment-color-control">
+                            <span className="visually-hidden">Escolher a cor de {segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index)}</span>
+                            <input
+                              type="color"
+                              value={routeSegmentColor(segment.index, segmentColors)}
+                              onChange={(event) => onChangeSegmentColor(segment.index, event.target.value)}
+                            />
+                          </label>
+                          <button
+                            className="gps-segment-visibility-toggle"
+                            type="button"
+                            aria-pressed={isSegmentVisible}
+                            onClick={() => toggleRouteSegmentVisibility(segment.index)}
+                          >
+                            {isSegmentVisible ? <Eye size={14} /> : <EyeOff size={14} />}
+                            <span>
+                              <strong>{segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index)}</strong>
+                              <small>{isSegmentVisible ? "Exibido no mapa" : "Oculto no mapa"}</small>
+                            </span>
+                          </button>
+                        </div>
+                        <span className="gps-segment-recording-time">
+                          Gravação: {formatRecordingTime(segment.timing.startTime)} → {formatRecordingTime(segment.timing.endTime)}
+                        </span>
+                        <SegmentDetailsForm
+                          key={`${segment.index}:${segmentDetails[segment.index]?.name ?? ""}:${segmentDetails[segment.index]?.departureTime ?? ""}:${segmentDetails[segment.index]?.arrivalTime ?? ""}`}
+                          segmentIndex={segment.index}
+                          detail={segmentDetails[segment.index]}
+                          endpoints={endpoints}
+                          waypoints={route.waypoints}
+                          disabled={isEditingPoints}
+                          canMarkEndpoints={mapReady && !isEditingPoints}
+                          isMarkingStart={isMarkingStart}
+                          isMarkingEnd={isMarkingEnd}
+                          onSave={(detail) => onSaveSegmentDetails(segment.index, detail)}
+                          onAssignEndpoint={(side, pointId) =>
+                            onAssignSegmentEndpoint(segment.index, side, pointId)
+                          }
+                          onMarkEndpoint={(side) => selectSegmentEndpointOnMap(segment.index, side)}
+                          onOpenProcedureModal={() =>
+                            setProcedureModalTarget({
+                              kind: "segment",
+                              segmentIndex: segment.index,
+                              title: segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index),
+                              currentProcedure: segmentDetails[segment.index]?.procedure
+                            })
+                          }
+                        />
+                      </li>
+                    );
+                  }
+
+                  const manualRoute = item.manualRoute;
+                  const index = item.index;
                   const color = manualRoute.color ?? MANUAL_ROUTE_COLORS[index % MANUAL_ROUTE_COLORS.length];
                   const isRouteVisible = !hiddenManualRouteIdSet.has(manualRoute.id);
                   const isRouteSelected = selectedManualRouteId === manualRoute.id;
@@ -2266,7 +2303,7 @@ export function GpsTrackingView({
                   return (
                     <li
                       className={`gps-recording-item gps-manual-recording-item${isRouteVisible ? " is-visible" : ""}${isRouteSelected ? " is-selected" : ""}`}
-                      key={manualRoute.id}
+                      key={`manual-${manualRoute.id}`}
                     >
                       <div className="gps-segment-item-header">
                         <label className="gps-segment-color-control">
@@ -2286,7 +2323,7 @@ export function GpsTrackingView({
                           {isRouteVisible ? <Eye size={14} /> : <EyeOff size={14} />}
                           <span>
                             <strong>{manualRoute.name}</strong>
-                            <small>{isRouteVisible ? "Exibida no mapa" : "Oculta no mapa"} · Traçado manual</small>
+                            <small>{isRouteVisible ? "Exibida no mapa" : "Oculta no mapa"}</small>
                           </span>
                         </button>
                       </div>
