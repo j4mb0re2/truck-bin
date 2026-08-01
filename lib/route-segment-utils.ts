@@ -10,6 +10,15 @@ export type RouteSegmentTiming = {
 
 export type RouteSegmentColors = Record<number, string>;
 
+export type SegmentEndpointSide = "start" | "end";
+
+export type RouteSegmentEndpoint = {
+  startPointId?: string;
+  endPointId?: string;
+};
+
+export type RouteSegmentEndpoints = Record<number, RouteSegmentEndpoint>;
+
 export type RenderedRouteSegment = {
   index: number;
   points: RouteCoordinate[];
@@ -136,6 +145,48 @@ function squaredDistanceToLineSegment(
   const closestX = startX + progress * deltaX;
   const closestY = startY + progress * deltaY;
   return (pointX - closestX) ** 2 + (pointY - closestY) ** 2;
+}
+
+export function closestCoordinateOnPolyline(
+  target: RouteCoordinate,
+  points: RouteCoordinate[]
+): RouteCoordinate {
+  if (!points.length) return { ...target };
+  if (points.length === 1) return { ...points[0] };
+
+  const longitudeScale = Math.max(Math.cos((target.latitude * Math.PI) / 180), 0.0000001);
+  const targetX = target.longitude * longitudeScale;
+  const targetY = target.latitude;
+  let closestCoordinate = points[0];
+  let closestDistance = Number.POSITIVE_INFINITY;
+
+  for (let pointIndex = 1; pointIndex < points.length; pointIndex += 1) {
+    const start = points[pointIndex - 1];
+    const end = points[pointIndex];
+    const startX = start.longitude * longitudeScale;
+    const startY = start.latitude;
+    const endX = end.longitude * longitudeScale;
+    const endY = end.latitude;
+    const deltaX = endX - startX;
+    const deltaY = endY - startY;
+    const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+    const progress = lengthSquared === 0
+      ? 0
+      : Math.max(
+        0,
+        Math.min(1, ((targetX - startX) * deltaX + (targetY - startY) * deltaY) / lengthSquared)
+      );
+    const longitude = start.longitude + (end.longitude - start.longitude) * progress;
+    const latitude = start.latitude + (end.latitude - start.latitude) * progress;
+    const distance = (targetX - longitude * longitudeScale) ** 2 + (targetY - latitude) ** 2;
+
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closestCoordinate = { latitude, longitude };
+    }
+  }
+
+  return closestCoordinate;
 }
 
 function closestGeographicSegmentIndex(

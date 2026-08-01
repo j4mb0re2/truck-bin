@@ -2280,7 +2280,8 @@ button {
 }
 
 .gps-add-point-hint,
-.gps-edit-points-hint {
+.gps-edit-points-hint,
+.gps-endpoint-selection-hint {
   padding: 7px 9px;
   color: #245d86;
   background: rgba(238, 247, 251, 0.96);
@@ -2297,9 +2298,21 @@ button {
   border-color: #d9c9ee;
 }
 
+.gps-endpoint-selection-hint {
+  color: #8a5512;
+  background: rgba(255, 248, 234, 0.97);
+  border-color: #ecd1a2;
+}
+
 .gps-map.is-adding-point,
 .gps-map.is-adding-point .leaflet-container,
 .gps-map.is-adding-point .leaflet-interactive {
+  cursor: crosshair !important;
+}
+
+.gps-map.is-selecting-segment-endpoint,
+.gps-map.is-selecting-segment-endpoint .leaflet-container,
+.gps-map.is-selecting-segment-endpoint .leaflet-interactive {
   cursor: crosshair !important;
 }
 
@@ -2544,6 +2557,7 @@ button {
 
 .gps-recording-item {
   justify-content: space-between;
+  align-items: flex-start !important;
 }
 
 .gps-recording-item > div {
@@ -2554,6 +2568,77 @@ button {
 .gps-recording-item strong,
 .gps-recording-item span:not(.visually-hidden) {
   display: block;
+}
+
+.gps-segment-endpoint-controls {
+  margin-top: 9px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 5px 6px;
+}
+
+.gps-segment-endpoint-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.gps-segment-endpoint-field > span {
+  margin: 0 !important;
+  color: #66777c !important;
+  font-size: 8px !important;
+  font-weight: 750 !important;
+}
+
+.gps-segment-endpoint-field select {
+  width: 100%;
+  min-width: 0;
+  height: 27px;
+  padding: 0 7px;
+  color: #506368;
+  background: #fff;
+  border: 1px solid #d8e4e7;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 8px;
+  font-weight: 650;
+}
+
+.gps-segment-endpoint-field select:disabled {
+  color: #9aa8aa;
+  background: #f2f5f5;
+}
+
+.gps-mark-endpoint-button {
+  min-height: 27px;
+  padding: 5px 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  color: #7b541d;
+  background: #fffaf0;
+  border: 1px solid #ecd6af;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 750;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.gps-mark-endpoint-button:hover,
+.gps-mark-endpoint-button.is-active {
+  color: #fff;
+  background: #b7791f;
+  border-color: #b7791f;
+}
+
+.gps-mark-endpoint-button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .gps-recording-item strong {
@@ -2640,6 +2725,13 @@ button {
   color: #fff;
   background: var(--route-point-color);
   border-color: var(--route-point-color);
+}
+
+.gps-segment-endpoint-marker > span {
+  min-width: 48px;
+  padding: 4px 5px;
+  text-align: center;
+  font-size: 7px;
 }
 
 .gps-waypoint-marker > span {
@@ -3108,7 +3200,8 @@ button {
   }
 
   .gps-add-point-hint,
-  .gps-edit-points-hint {
+  .gps-edit-points-hint,
+  .gps-endpoint-selection-hint {
     order: 3;
     flex: 1 1 100%;
   }

@@ -17,11 +17,16 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GpxCoordinate, GpxRouteData } from "../lib/gpx-route";
 import {
+  closestCoordinateOnPolyline,
   getRenderedRouteSegments,
   routeSegmentColor,
   routeSegmentLabel
 } from "../lib/route-segment-utils";
-import type { RouteSegmentColors } from "../lib/route-segment-utils";
+import type {
+  RouteSegmentColors,
+  RouteSegmentEndpoints,
+  SegmentEndpointSide
+} from "../lib/route-segment-utils";
 
 type GpsState = "idle" | "searching" | "tracking" | "error";
 type LivePosition = {
@@ -29,6 +34,10 @@ type LivePosition = {
   longitude: number;
   accuracy: number;
   updatedAt: string;
+};
+type EndpointMapSelection = {
+  segmentIndex: number;
+  side: SegmentEndpointSide;
 };
 type LeafletApi = typeof import("leaflet");
 
@@ -76,22 +85,36 @@ export function GpsTrackingView({
   pointStepCounts,
   pointSegmentIndexes,
   segmentColors,
+  segmentEndpoints,
   initialWaypointId,
   onAddPoint,
   onEditPoint,
   onSavePointPositions,
   onChangeSegmentColor,
+  onAssignSegmentEndpoint,
+  onCreateSegmentEndpoint,
   onBack
 }: {
   route: GpxRouteData;
   pointStepCounts: Record<string, number>;
   pointSegmentIndexes: Record<string, number>;
   segmentColors: RouteSegmentColors;
+  segmentEndpoints: RouteSegmentEndpoints;
   initialWaypointId: string | null;
   onAddPoint: (coordinate: GpxCoordinate) => void;
   onEditPoint: (pointId: string) => void;
   onSavePointPositions: (positions: Record<string, GpxCoordinate>) => void;
   onChangeSegmentColor: (segmentIndex: number, color: string) => void;
+  onAssignSegmentEndpoint: (
+    segmentIndex: number,
+    side: SegmentEndpointSide,
+    pointId: string | null
+  ) => void;
+  onCreateSegmentEndpoint: (
+    segmentIndex: number,
+    side: SegmentEndpointSide,
+    coordinate: GpxCoordinate
+  ) => void;
   onBack: () => void;
 }) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -105,8 +128,10 @@ export function GpsTrackingView({
   const onAddPointRef = useRef(onAddPoint);
   const onEditPointRef = useRef(onEditPoint);
   const onSavePointPositionsRef = useRef(onSavePointPositions);
+  const onCreateSegmentEndpointRef = useRef(onCreateSegmentEndpoint);
   const addPointModeRef = useRef(false);
   const isEditingPointsRef = useRef(false);
+  const endpointMapSelectionRef = useRef<EndpointMapSelection | null>(null);
   const waypointMarkersRef = useRef<Record<string, import("leaflet").Marker>>({});
   const pointPositionEditsRef = useRef<Record<string, GpxCoordinate>>({});
   const originalPointPositionsRef = useRef<Record<string, GpxCoordinate>>({});
@@ -117,6 +142,7 @@ export function GpsTrackingView({
   const [isAddingPoint, setIsAddingPoint] = useState(false);
   const [isEditingPoints, setIsEditingPoints] = useState(false);
   const [pendingPointPositionCount, setPendingPointPositionCount] = useState(0);
+  const [endpointMapSelection, setEndpointMapSelection] = useState<EndpointMapSelection | null>(null);
 
   useEffect(() => {
     onAddPointRef.current = onAddPoint;
@@ -129,6 +155,10 @@ export function GpsTrackingView({
   useEffect(() => {
     onSavePointPositionsRef.current = onSavePointPositions;
   }, [onSavePointPositions]);
+
+  useEffect(() => {
+    onCreateSegmentEndpointRef.current = onCreateSegmentEndpoint;
+  }, [onCreateSegmentEndpoint]);
 
   useEffect(() => {
     addPointModeRef.current = isAddingPoint;
@@ -159,7 +189,7 @@ export function GpsTrackingView({
   }, []);
 
   const toggleAddPointMode = useCallback(() => {
-    if (isEditingPointsRef.current) return;
+    if (isEditingPointsRef.current || endpointMapSelectionRef.current) return;
 
     setIsAddingPoint((currentMode) => {
       const nextMode = !currentMode;
@@ -167,6 +197,24 @@ export function GpsTrackingView({
       return nextMode;
     });
   }, []);
+
+  const clearEndpointMapSelection = useCallback(() => {
+    endpointMapSelectionRef.current = null;
+    setEndpointMapSelection(null);
+  }, []);
+
+  const selectSegmentEndpointOnMap = useCallback(
+    (segmentIndex: number, side: SegmentEndpointSide) => {
+      if (!mapReady || isEditingPointsRef.current) return;
+
+      addPointModeRef.current = false;
+      setIsAddingPoint(false);
+      const selection = { segmentIndex, side };
+      endpointMapSelectionRef.current = selection;
+      setEndpointMapSelection(selection);
+    },
+    [mapReady]
+  );
 
   const setWaypointMarkersEditing = useCallback((editable: boolean) => {
     Object.values(waypointMarkersRef.current).forEach((marker) => {
@@ -180,6 +228,8 @@ export function GpsTrackingView({
 
     addPointModeRef.current = false;
     setIsAddingPoint(false);
+    endpointMapSelectionRef.current = null;
+    setEndpointMapSelection(null);
     pointPositionEditsRef.current = {};
     originalPointPositionsRef.current = Object.fromEntries(
       Object.entries(waypointMarkersRef.current).map(([pointId, marker]) => {
@@ -347,7 +397,7 @@ export function GpsTrackingView({
         );
         const color = routeSegmentColor(segment.index, segmentColors);
         allCoordinates.push(...coordinates);
-        leaflet
+        const routeLine = leaflet
           .polyline(coordinates, {
             color,
             weight: 5,
@@ -356,6 +406,20 @@ export function GpsTrackingView({
             lineJoin: "round"
           })
           .addTo(activeMap);
+
+        routeLine.on("click", (event) => {
+          const selection = endpointMapSelectionRef.current;
+          if (!selection || selection.segmentIndex !== segment.index) return;
+
+          leaflet.DomEvent.stopPropagation(event.originalEvent);
+          const coordinate = closestCoordinateOnPolyline(
+            { latitude: event.latlng.lat, longitude: event.latlng.lng },
+            segment.points
+          );
+          endpointMapSelectionRef.current = null;
+          setEndpointMapSelection(null);
+          onCreateSegmentEndpointRef.current(segment.index, selection.side, coordinate);
+        });
       });
 
       const firstSegment = visibleRouteSegments.at(0);
@@ -388,6 +452,38 @@ export function GpsTrackingView({
           .bindTooltip(tooltipText(`Fim do arquivo GPX · ${routeSegmentLabel(lastSegment?.index ?? 0)}`))
           .addTo(activeMap);
       }
+
+      const pointsById = new globalThis.Map(route.waypoints.map((point) => [point.id, point]));
+      Object.entries(segmentEndpoints).forEach(([rawSegmentIndex, endpoints]) => {
+        const segmentIndex = Number(rawSegmentIndex);
+        if (!Number.isInteger(segmentIndex) || !visibleRouteSegments[segmentIndex]) return;
+
+        const endpointEntries: Array<[SegmentEndpointSide, string | undefined]> = [
+          ["start", endpoints.startPointId],
+          ["end", endpoints.endPointId]
+        ];
+
+        endpointEntries.forEach(([side, pointId]) => {
+          const point = pointId ? pointsById.get(pointId) : undefined;
+          if (!point) return;
+
+          const label = `${side === "start" ? "Início" : "Fim"} T${segmentIndex + 1}`;
+          leaflet
+            .marker([point.latitude, point.longitude], {
+              icon: leaflet.divIcon({
+                className: `gps-route-marker gps-segment-endpoint-marker gps-${side}-endpoint-marker has-route-segment`,
+                html: `<span style="--route-point-color:${routeSegmentColor(segmentIndex, segmentColors)}">${label}</span>`,
+                iconSize: [58, 24],
+                iconAnchor: [29, side === "start" ? 29 : -5]
+              }),
+              zIndexOffset: 500
+            })
+            .bindTooltip(
+              tooltipText(`${side === "start" ? "Início" : "Fim"} definido · ${routeSegmentLabel(segmentIndex)} · ${point.name}`)
+            )
+            .addTo(activeMap);
+        });
+      });
 
       route.waypoints.forEach((point, index) => {
         const stepCount = pointStepCounts[point.id] ?? 0;
@@ -481,7 +577,17 @@ export function GpsTrackingView({
       if (mapRef.current === null) leafletRef.current = null;
       setMapReady(false);
     };
-  }, [initialWaypoint, initialWaypointId, pointSegmentIndexes, pointStepCounts, route, segmentColors, updateTruckMarker, visibleRouteSegments]);
+  }, [
+    initialWaypoint,
+    initialWaypointId,
+    pointSegmentIndexes,
+    pointStepCounts,
+    route,
+    segmentColors,
+    segmentEndpoints,
+    updateTruckMarker,
+    visibleRouteSegments
+  ]);
 
   useEffect(() => stopTracking, [stopTracking]);
 
@@ -502,7 +608,7 @@ export function GpsTrackingView({
           <button
             className={`secondary-button gps-add-point-button ${isAddingPoint ? "is-active" : ""}`}
             type="button"
-            disabled={!mapReady || isEditingPoints}
+            disabled={!mapReady || isEditingPoints || Boolean(endpointMapSelection)}
             aria-pressed={isAddingPoint}
             onClick={toggleAddPointMode}
           >
@@ -537,6 +643,11 @@ export function GpsTrackingView({
                 Arraste os pontos numerados. A linha GPX não muda.
               </span>
             )}
+            {endpointMapSelection && (
+              <span className="gps-endpoint-selection-hint" role="status">
+                Clique na linha do trecho {endpointMapSelection.segmentIndex + 1} para marcar o {endpointMapSelection.side === "start" ? "início" : "fim"}.
+              </span>
+            )}
             <div className="gps-map-edit-controls">
               {isEditingPoints ? (
                 <>
@@ -552,6 +663,14 @@ export function GpsTrackingView({
                     <Save size={14} /> {pendingPointPositionCount ? `Salvar (${pendingPointPositionCount})` : "Salvar"}
                   </button>
                 </>
+              ) : endpointMapSelection ? (
+                <button
+                  className="gps-cancel-points-button"
+                  type="button"
+                  onClick={clearEndpointMapSelection}
+                >
+                  <X size={14} /> Cancelar marcação
+                </button>
               ) : (
                 <button
                   className="gps-edit-points-button"
@@ -566,7 +685,7 @@ export function GpsTrackingView({
             <span className="gps-map-points">{route.totalTrackPoints.toLocaleString("pt-BR")} pontos GPX</span>
           </div>
           <div
-            className={`gps-map${isAddingPoint ? " is-adding-point" : ""}${isEditingPoints ? " is-editing-points" : ""}`}
+            className={`gps-map${isAddingPoint ? " is-adding-point" : ""}${isEditingPoints ? " is-editing-points" : ""}${endpointMapSelection ? " is-selecting-segment-endpoint" : ""}`}
             ref={mapContainerRef}
             aria-label="Mapa da rota GPS"
           />
@@ -635,26 +754,93 @@ export function GpsTrackingView({
                 <h3 id="gps-segment-legend-title">Gravações e cores</h3>
                 <span>{visibleRouteSegments.length} trechos</span>
               </div>
-              <p>Defina a cor do traçado e dos pontos ligados a cada gravação.</p>
+              <p>
+                Defina a cor e escolha os pontos de início/fim. Se não existir um ponto,
+                marque-o diretamente na linha da rota.
+              </p>
               <ol>
-                {visibleRouteSegments.map((segment) => (
-                  <li className="gps-recording-item" key={segment.index}>
-                    <label className="gps-segment-color-control">
-                      <span className="visually-hidden">Escolher a cor do trecho {segment.index + 1}</span>
-                      <input
-                        type="color"
-                        value={routeSegmentColor(segment.index, segmentColors)}
-                        onChange={(event) => onChangeSegmentColor(segment.index, event.target.value)}
-                      />
-                    </label>
-                    <div>
-                      <strong>Trecho {segment.index + 1}</strong>
-                      <span>
-                        Gravação: {formatRecordingTime(segment.timing.startTime)} → {formatRecordingTime(segment.timing.endTime)}
-                      </span>
-                    </div>
-                  </li>
-                ))}
+                {visibleRouteSegments.map((segment) => {
+                  const endpoints = segmentEndpoints[segment.index] ?? {};
+                  const isMarkingStart =
+                    endpointMapSelection?.segmentIndex === segment.index &&
+                    endpointMapSelection.side === "start";
+                  const isMarkingEnd =
+                    endpointMapSelection?.segmentIndex === segment.index &&
+                    endpointMapSelection.side === "end";
+
+                  return (
+                    <li className="gps-recording-item" key={segment.index}>
+                      <label className="gps-segment-color-control">
+                        <span className="visually-hidden">Escolher a cor do trecho {segment.index + 1}</span>
+                        <input
+                          type="color"
+                          value={routeSegmentColor(segment.index, segmentColors)}
+                          onChange={(event) => onChangeSegmentColor(segment.index, event.target.value)}
+                        />
+                      </label>
+                      <div>
+                        <strong>Trecho {segment.index + 1}</strong>
+                        <span>
+                          Gravação: {formatRecordingTime(segment.timing.startTime)} → {formatRecordingTime(segment.timing.endTime)}
+                        </span>
+                        <div className="gps-segment-endpoint-controls">
+                          <label className="gps-segment-endpoint-field">
+                            <span>Início</span>
+                            <select
+                              value={endpoints.startPointId ?? ""}
+                              disabled={isEditingPoints}
+                              onChange={(event) =>
+                                onAssignSegmentEndpoint(segment.index, "start", event.target.value || null)
+                              }
+                            >
+                              <option value="">Usar início da gravação</option>
+                              {route.waypoints.map((point, pointIndex) => (
+                                <option key={point.id} value={point.id}>
+                                  {pointIndex + 1}. {point.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <button
+                            className={`gps-mark-endpoint-button ${isMarkingStart ? "is-active" : ""}`}
+                            type="button"
+                            disabled={!mapReady || isEditingPoints}
+                            aria-pressed={isMarkingStart}
+                            onClick={() => selectSegmentEndpointOnMap(segment.index, "start")}
+                          >
+                            <MapPinned size={12} /> {isMarkingStart ? "Clique na linha" : "Marcar na linha"}
+                          </button>
+                          <label className="gps-segment-endpoint-field">
+                            <span>Fim</span>
+                            <select
+                              value={endpoints.endPointId ?? ""}
+                              disabled={isEditingPoints}
+                              onChange={(event) =>
+                                onAssignSegmentEndpoint(segment.index, "end", event.target.value || null)
+                              }
+                            >
+                              <option value="">Usar fim da gravação</option>
+                              {route.waypoints.map((point, pointIndex) => (
+                                <option key={point.id} value={point.id}>
+                                  {pointIndex + 1}. {point.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <button
+                            className={`gps-mark-endpoint-button ${isMarkingEnd ? "is-active" : ""}`}
+                            type="button"
+                            disabled={!mapReady || isEditingPoints}
+                            aria-pressed={isMarkingEnd}
+                            onClick={() => selectSegmentEndpointOnMap(segment.index, "end")}
+                          >
+                            <MapPinned size={12} /> {isMarkingEnd ? "Clique na linha" : "Marcar na linha"}
+                          </button>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
               </ol>
             </section>
           )}

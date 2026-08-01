@@ -38,7 +38,11 @@ import {
   routeSegmentColor,
   routeSegmentLabel
 } from "../lib/route-segment-utils";
-import type { RouteSegmentColors } from "../lib/route-segment-utils";
+import type {
+  RouteSegmentColors,
+  RouteSegmentEndpoints,
+  SegmentEndpointSide
+} from "../lib/route-segment-utils";
 
 type StopType = "stage" | "taiki" | "lunch";
 type StageOperation = "loading" | "unloading";
@@ -87,6 +91,7 @@ type GpsPointCatalog = {
   manualPoints: GpxWaypoint[];
   pointCoordinates: Record<string, GpxCoordinate>;
   segmentColors: RouteSegmentColors;
+  segmentEndpoints: RouteSegmentEndpoints;
 };
 type ResolvedGpsPoint = GpxWaypoint & {
   source: "gpx" | "manual";
@@ -95,6 +100,10 @@ type GpsPointEditDraft = {
   point: ResolvedGpsPoint;
   position: number;
   isNew: boolean;
+  endpointAssignment?: {
+    segmentIndex: number;
+    side: SegmentEndpointSide;
+  };
 };
 type GpsPointDragState = {
   activeId: string;
@@ -113,13 +122,14 @@ const STORAGE_KEY = "roteiro-truck-routes-v1";
 const FIXED_POINTS_KEY = "roteiro-truck-fixed-points-v1";
 const GPS_POINT_CONFIGS_KEY = "roteiro-truck-gps-point-configs-v1";
 const GPS_POINTS_KEY = "roteiro-truck-gps-points-v1";
-const BACKUP_VERSION = 5;
+const BACKUP_VERSION = 6;
 const EMPTY_GPS_POINT_CATALOG: GpsPointCatalog = {
   pointOrder: [],
   pointNames: {},
   manualPoints: [],
   pointCoordinates: {},
-  segmentColors: {}
+  segmentColors: {},
+  segmentEndpoints: {}
 };
 
 type BackupMessage = {
@@ -365,6 +375,29 @@ function normalizeGpsPointCatalog(value: unknown): GpsPointCatalog {
       )
       : {};
 
+  const segmentEndpoints =
+    catalog.segmentEndpoints &&
+    typeof catalog.segmentEndpoints === "object" &&
+    !Array.isArray(catalog.segmentEndpoints)
+      ? Object.entries(catalog.segmentEndpoints).reduce<RouteSegmentEndpoints>(
+        (endpoints, [segmentIndex, endpoint]) => {
+          const index = Number(segmentIndex);
+          if (!Number.isInteger(index) || index < 0 || !endpoint || typeof endpoint !== "object") {
+            return endpoints;
+          }
+
+          const saved = endpoint as { startPointId?: unknown; endPointId?: unknown };
+          const startPointId =
+            typeof saved.startPointId === "string" && saved.startPointId ? saved.startPointId : undefined;
+          const endPointId =
+            typeof saved.endPointId === "string" && saved.endPointId ? saved.endPointId : undefined;
+          if (startPointId || endPointId) endpoints[index] = { startPointId, endPointId };
+          return endpoints;
+        },
+        {}
+      )
+      : {};
+
   const seenOrderIds = new Set<string>();
   const pointOrder = Array.isArray(catalog.pointOrder)
     ? catalog.pointOrder.filter((id): id is string => {
@@ -374,7 +407,14 @@ function normalizeGpsPointCatalog(value: unknown): GpsPointCatalog {
     })
     : [];
 
-  return { manualPoints, pointNames, pointCoordinates, pointOrder, segmentColors };
+  return {
+    manualPoints,
+    pointNames,
+    pointCoordinates,
+    pointOrder,
+    segmentColors,
+    segmentEndpoints
+  };
 }
 
 function getGpsPointOrder(gpxPoints: GpxWaypoint[], catalog: GpsPointCatalog) {
@@ -893,6 +933,33 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     setGpsPointEditDraft({ point, position: gpsPoints.length + 1, isNew: true });
   }
 
+  function addGpsSegmentEndpointFromMap(
+    segmentIndex: number,
+    side: SegmentEndpointSide,
+    coordinate: GpxCoordinate
+  ) {
+    if (!Number.isInteger(segmentIndex) || segmentIndex < 0 || !isValidGpsCoordinate(coordinate)) {
+      return;
+    }
+
+    const endpointLabel = side === "start" ? "Início" : "Fim";
+    const point: ResolvedGpsPoint = {
+      id: `gps-manual-${cryptoId()}`,
+      name: `${endpointLabel} do trecho ${segmentIndex + 1}`,
+      description: `${endpointLabel} definido na linha da rota`,
+      time: "",
+      latitude: coordinate.latitude,
+      longitude: coordinate.longitude,
+      source: "manual"
+    };
+    setGpsPointEditDraft({
+      point,
+      position: gpsPoints.length + 1,
+      isNew: true,
+      endpointAssignment: { segmentIndex, side }
+    });
+  }
+
   function saveGpsPointEditor(draftToSave: GpsPointEditDraft, name: string, position: number) {
     const cleanedName = name.trim();
     if (!cleanedName) return;
@@ -923,13 +990,22 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       pointOrder.splice(nextPosition - 1, 0, savedPoint.id);
       const pointCoordinates = { ...current.pointCoordinates };
       if (draftToSave.point.source === "manual") delete pointCoordinates[savedPoint.id];
+      const segmentEndpoints = { ...current.segmentEndpoints };
+      const endpointAssignment = draftToSave.endpointAssignment;
+
+      if (endpointAssignment) {
+        const endpoint = { ...segmentEndpoints[endpointAssignment.segmentIndex] };
+        endpoint[endpointAssignment.side === "start" ? "startPointId" : "endPointId"] = savedPoint.id;
+        segmentEndpoints[endpointAssignment.segmentIndex] = endpoint;
+      }
 
       return {
         ...current,
         manualPoints,
         pointNames: { ...current.pointNames, [savedPoint.id]: cleanedName },
         pointCoordinates,
-        pointOrder
+        pointOrder,
+        segmentEndpoints
       };
     });
     setGpsFocusPointId(savedPoint.id);
@@ -963,6 +1039,33 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       ...current,
       segmentColors: { ...current.segmentColors, [segmentIndex]: color }
     }));
+  }
+
+  function saveGpsSegmentEndpoint(
+    segmentIndex: number,
+    side: SegmentEndpointSide,
+    pointId: string | null
+  ) {
+    if (!Number.isInteger(segmentIndex) || segmentIndex < 0) return;
+    const knownPointIds = new Set(gpsPoints.map((point) => point.id));
+    if (pointId && !knownPointIds.has(pointId)) return;
+
+    setGpsPointCatalog((current) => {
+      const segmentEndpoints = { ...current.segmentEndpoints };
+      const endpoint = { ...segmentEndpoints[segmentIndex] };
+      const endpointKey = side === "start" ? "startPointId" : "endPointId";
+
+      if (pointId) endpoint[endpointKey] = pointId;
+      else delete endpoint[endpointKey];
+
+      if (endpoint.startPointId || endpoint.endPointId) {
+        segmentEndpoints[segmentIndex] = endpoint;
+      } else {
+        delete segmentEndpoints[segmentIndex];
+      }
+
+      return { ...current, segmentEndpoints };
+    });
   }
 
   function reorderGpsPoints(activeId: string, overId: string) {
@@ -1179,11 +1282,14 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           pointStepCounts={gpsPointStepCounts}
           pointSegmentIndexes={gpsPointSegmentIndexes}
           segmentColors={gpsPointCatalog.segmentColors}
+          segmentEndpoints={gpsPointCatalog.segmentEndpoints}
           initialWaypointId={gpsFocusPointId}
           onAddPoint={addGpsPointFromMap}
           onEditPoint={openGpsPointEditorById}
           onSavePointPositions={saveGpsPointPositions}
           onChangeSegmentColor={saveGpsSegmentColor}
+          onAssignSegmentEndpoint={saveGpsSegmentEndpoint}
+          onCreateSegmentEndpoint={addGpsSegmentEndpointFromMap}
           onBack={() => {
             setViewMode("routes");
             setGpsFocusPointId(null);
@@ -2403,6 +2509,9 @@ function GpsPointEditorModal({
 }) {
   const [name, setName] = useState(draft.point.name);
   const [position, setPosition] = useState(String(draft.position));
+  const endpointLabel = draft.endpointAssignment
+    ? `${draft.endpointAssignment.side === "start" ? "Início" : "Fim"} do trecho ${draft.endpointAssignment.segmentIndex + 1}`
+    : null;
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -2427,10 +2536,12 @@ function GpsPointEditorModal({
           <div>
             <span className="eyebrow">{draft.isNew ? "NOVO PONTO NO MAPA" : "PONTO DA ROTA GPS"}</span>
             <h2 id="gps-point-editor-title">
-              {draft.isNew ? "Adicionar ponto" : "Editar ponto"}
+              {draft.isNew ? endpointLabel ?? "Adicionar ponto" : "Editar ponto"}
             </h2>
             <p>
-              {draft.isNew
+              {endpointLabel
+                ? "Dê um nome a este marcador. Ao salvar, ele ficará ligado a este trecho da rota."
+                : draft.isNew
                 ? "Defina o nome e a posição deste novo marcador na sua lista."
                 : "Altere o nome e o número que aparecem no mapa e em Minhas rotas."}
             </p>
@@ -2618,7 +2729,7 @@ function BackupModal({
               <strong>Um arquivo, toda a configuração</strong>
               <p>
                 O backup inclui pontos fixos, rotas, horários, stages, taikis,
-                almoços, configurações, nomes, posições e cores dos pontos GPS.
+                almoços, configurações, nomes, posições, cores e inícios/fins dos trechos GPS.
               </p>
             </div>
           </div>
