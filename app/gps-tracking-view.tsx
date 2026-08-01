@@ -2,8 +2,8 @@
 
 import {
   ArrowLeft,
+  ArrowRight,
   Bell,
-  CheckCircle2,
   ClipboardList,
   Clock,
   Crosshair,
@@ -2047,6 +2047,46 @@ export function GpsTrackingView({
     );
   }
 
+  function handleProceedToNextRoute() {
+    if (!activeProcedurePopup) return;
+
+    const popupKey = activeProcedurePopup.key;
+    setDismissedProcedureKeys((current) => [...current, popupKey]);
+
+    const currentIndex = sortedAllGpsItems.findIndex((item) => {
+      if (item.kind === "segment") {
+        return popupKey.startsWith(`segment-${item.segment.index}`);
+      } else {
+        return popupKey.startsWith(`manual-${item.manualRoute.id}`);
+      }
+    });
+
+    if (currentIndex >= 0) {
+      const currentItem = sortedAllGpsItems[currentIndex];
+
+      // Ocultar o trajeto atual concluído do mapa
+      if (currentItem.kind === "segment") {
+        setHiddenRouteSegmentIndexes((current) => Array.from(new Set([...current, currentItem.segment.index])));
+      } else {
+        setHiddenManualRouteIds((current) => Array.from(new Set([...current, currentItem.manualRoute.id])));
+      }
+
+      // Avançar visibilidade e foco para o próximo trajeto
+      if (currentIndex + 1 < sortedAllGpsItems.length) {
+        const nextItem = sortedAllGpsItems[currentIndex + 1];
+        if (nextItem.kind === "segment") {
+          setHiddenRouteSegmentIndexes((current) => current.filter((i) => i !== nextItem.segment.index));
+          focusRouteSegment(nextItem.segment.index);
+        } else {
+          setHiddenManualRouteIds((current) => current.filter((id) => id !== nextItem.manualRoute.id));
+          focusManualRoute(nextItem.manualRoute.id);
+        }
+      }
+    }
+
+    setActiveProcedurePopup(null);
+  }
+
   return (
     <main className="gps-page">
       <header className="gps-page-header">
@@ -2531,10 +2571,7 @@ export function GpsTrackingView({
             setDismissedProcedureKeys((current) => [...current, activeProcedurePopup.key]);
             setActiveProcedurePopup(null);
           }}
-          onComplete={() => {
-            setDismissedProcedureKeys((current) => [...current, activeProcedurePopup.key]);
-            setActiveProcedurePopup(null);
-          }}
+          onProceedToNext={handleProceedToNextRoute}
         />
       )}
     </main>
@@ -2544,11 +2581,11 @@ export function GpsTrackingView({
 export function ActiveProcedurePopupModal({
   popup,
   onClose,
-  onComplete
+  onProceedToNext
 }: {
   popup: ActiveProcedurePopup;
   onClose: () => void;
-  onComplete: () => void;
+  onProceedToNext: () => void;
 }) {
   const [now, setNow] = useState(() => new Date());
   const procConfig = PROCEDURE_CONFIG[popup.procedure.procedureType];
@@ -2637,17 +2674,18 @@ export function ActiveProcedurePopupModal({
           </div>
         </div>
 
-        <div className="modal-actions" style={{ padding: "14px 24px 20px", display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+        <div className="modal-actions" style={{ padding: "14px 24px 20px", display: "flex", gap: "10px", justifyContent: "space-between" }}>
           <button type="button" className="secondary-button" onClick={onClose}>
             ✖️ Fechar
           </button>
           <button
             type="button"
             className="primary-button"
-            style={{ backgroundColor: "#10b981", borderColor: "#059669" }}
-            onClick={onComplete}
+            style={{ backgroundColor: "#0284c7", borderColor: "#0369a1", display: "inline-flex", alignItems: "center", gap: "8px" }}
+            onClick={onProceedToNext}
           >
-            <CheckCircle2 size={16} /> Concluir Operação
+            <span>Seguir para o próximo trajeto</span>
+            <ArrowRight size={18} />
           </button>
         </div>
       </div>
