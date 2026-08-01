@@ -288,7 +288,8 @@ function isValidManualRouteSetup(value: unknown): value is ManualRouteSetup {
     (setup.startPointId === undefined || typeof setup.startPointId === "string") &&
     (setup.endPointId === undefined || typeof setup.endPointId === "string") &&
     (setup.departureTime === undefined || typeof setup.departureTime === "string") &&
-    (setup.arrivalTime === undefined || typeof setup.arrivalTime === "string")
+    (setup.arrivalTime === undefined || typeof setup.arrivalTime === "string") &&
+    (setup.procedure === undefined || (typeof setup.procedure === "object" && setup.procedure !== null))
   );
 }
 
@@ -489,8 +490,22 @@ function normalizeGpsPointCatalog(value: unknown): GpsPointCatalog {
           const arrivalTime = isRouteSegmentDepartureTime(saved.arrivalTime)
             ? saved.arrivalTime
             : "";
-          if (name || departureTime || arrivalTime) {
-            details[index] = { name, departureTime, arrivalTime };
+          const procedure =
+            saved.procedure &&
+            typeof saved.procedure === "object" &&
+            (saved.procedure.endpointSide === "start" || saved.procedure.endpointSide === "end") &&
+            typeof saved.procedure.procedureType === "string"
+              ? {
+                  endpointSide: saved.procedure.endpointSide,
+                  procedureType: saved.procedure.procedureType,
+                  startTime: typeof saved.procedure.startTime === "string" ? saved.procedure.startTime : undefined,
+                  endTime: typeof saved.procedure.endTime === "string" ? saved.procedure.endTime : undefined,
+                  notes: typeof saved.procedure.notes === "string" ? saved.procedure.notes : undefined
+                }
+              : undefined;
+
+          if (name || departureTime || arrivalTime || procedure) {
+            details[index] = { name, departureTime, arrivalTime, procedure };
           }
           return details;
         },
@@ -1521,13 +1536,14 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
         const endPoint = endPointId ? pointsById.get(endPointId) : undefined;
         if (startPoint) manualPath = replaceManualPathEndpoint(manualPath, "start", startPoint);
         if (endPoint) manualPath = replaceManualPathEndpoint(manualPath, "end", endPoint);
+        const procedure = setup.procedure;
         return {
           ...route,
           name: name.trim() || route.name,
           departure: departureTime || route.departure,
           arrivalForecast: arrivalTime || route.arrivalForecast,
           manualPath,
-          manualSetup: { startPointId, endPointId, departureTime, arrivalTime }
+          manualSetup: { startPointId, endPointId, departureTime, arrivalTime, procedure }
         };
       })
     );
@@ -1543,11 +1559,12 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     const arrivalTime = isRouteSegmentDepartureTime(details.arrivalTime)
       ? details.arrivalTime
       : "";
+    const procedure = details.procedure;
 
     setGpsPointCatalog((current) => {
       const segmentDetails = { ...current.segmentDetails };
-      if (name || departureTime || arrivalTime) {
-        segmentDetails[segmentIndex] = { name, departureTime, arrivalTime };
+      if (name || departureTime || arrivalTime || procedure) {
+        segmentDetails[segmentIndex] = { name, departureTime, arrivalTime, procedure };
       } else {
         delete segmentDetails[segmentIndex];
       }

@@ -294,7 +294,7 @@ function SegmentDetailsForm({
             disabled={disabled}
             onClick={onOpenProcedureModal}
           >
-            <ClipboardList size={12} /> {detail?.procedure ? "Procedimento" : "Adicionar procedimento"}
+            <ClipboardList size={12} /> {detail?.procedure ? "Alterar procedimento" : "Adicionar procedimento"}
           </button>
           <button className="gps-save-segment-details-button" type="submit" disabled={disabled} style={{ flex: 1 }}>
             <Save size={12} /> Salvar trecho
@@ -458,7 +458,7 @@ function ManualRouteDetailsForm({
             disabled={disabled}
             onClick={onOpenProcedureModal}
           >
-            <ClipboardList size={12} /> {setup?.procedure ? "Procedimento" : "Adicionar procedimento"}
+            <ClipboardList size={12} /> {setup?.procedure ? "Alterar procedimento" : "Adicionar procedimento"}
           </button>
           <button className="gps-save-segment-details-button" type="submit" disabled={disabled} style={{ flex: 1 }}>
             <Save size={12} /> Salvar pontos e horários
