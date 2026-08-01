@@ -49,6 +49,9 @@ type EndpointMapSelection = {
 type ManualMapRoute = {
   id: string;
   name: string;
+  departure: string;
+  arrivalForecast: string;
+  color?: string;
   points: GpxCoordinate[];
 };
 type RouteBoundaryMarker = {
@@ -252,6 +255,7 @@ export function GpsTrackingView({
   onEditPoint,
   onSavePointPositions,
   onChangeSegmentColor,
+  onChangeManualRouteColor,
   onSaveSegmentDetails,
   onAssignSegmentEndpoint,
   onCreateSegmentEndpoint,
@@ -270,6 +274,7 @@ export function GpsTrackingView({
   onEditPoint: (pointId: string) => void;
   onSavePointPositions: (positions: Record<string, GpxCoordinate>) => void;
   onChangeSegmentColor: (segmentIndex: number, color: string) => void;
+  onChangeManualRouteColor: (routeId: string, color: string) => void;
   onSaveSegmentDetails: (segmentIndex: number, detail: RouteSegmentDetail) => void;
   onAssignSegmentEndpoint: (
     segmentIndex: number,
@@ -302,9 +307,12 @@ export function GpsTrackingView({
   const endpointMapSelectionRef = useRef<EndpointMapSelection | null>(null);
   const routeLineClickRef = useRef(false);
   const routeLinesRef = useRef<Record<number, import("leaflet").Polyline>>({});
+  const manualRouteLinesRef = useRef<Record<string, import("leaflet").Polyline>>({});
   const routeBoundaryMarkersRef = useRef<RouteBoundaryMarker[]>([]);
   const hiddenRouteSegmentIndexSetRef = useRef<ReadonlySet<number>>(new Set());
+  const hiddenManualRouteIdSetRef = useRef<ReadonlySet<string>>(new Set());
   const routeEndpointMarkersRef = useRef<import("leaflet").Marker[]>([]);
+  const manualRouteMarkersRef = useRef<Record<string, import("leaflet").Marker[]>>({});
   const manualRouteDraftRef = useRef<GpxCoordinate[]>([]);
   const manualRouteDraftLineRef = useRef<import("leaflet").Polyline | null>(null);
   const manualRoutePreviewLineRef = useRef<import("leaflet").Polyline | null>(null);
@@ -322,6 +330,8 @@ export function GpsTrackingView({
   const [endpointMapSelection, setEndpointMapSelection] = useState<EndpointMapSelection | null>(null);
   const [selectedRouteSegmentIndex, setSelectedRouteSegmentIndex] = useState<number | null>(null);
   const [hiddenRouteSegmentIndexes, setHiddenRouteSegmentIndexes] = useState<number[]>([]);
+  const [selectedManualRouteId, setSelectedManualRouteId] = useState<string | null>(null);
+  const [hiddenManualRouteIds, setHiddenManualRouteIds] = useState<string[]>([]);
   const [isDrawingManualRoute, setIsDrawingManualRoute] = useState(false);
   const [manualRouteDraft, setManualRouteDraft] = useState<GpxCoordinate[]>([]);
 
@@ -362,16 +372,25 @@ export function GpsTrackingView({
     () => new Set(hiddenRouteSegmentIndexes),
     [hiddenRouteSegmentIndexes]
   );
+  const hiddenManualRouteIdSet = useMemo(
+    () => new Set(hiddenManualRouteIds),
+    [hiddenManualRouteIds]
+  );
 
   useEffect(() => {
     hiddenRouteSegmentIndexSetRef.current = hiddenRouteSegmentIndexSet;
   }, [hiddenRouteSegmentIndexSet]);
+  useEffect(() => {
+    hiddenManualRouteIdSetRef.current = hiddenManualRouteIdSet;
+  }, [hiddenManualRouteIdSet]);
   const manualRoutePointCount = useMemo(
     () => manualRoutes.reduce((total, manualRoute) => total + manualRoute.points.length, 0),
     [manualRoutes]
   );
   const hasRoute = visibleRouteSegments.length > 0 || manualRoutes.length > 0;
   const initialWaypoint = route.waypoints.find((point) => point.id === initialWaypointId);
+  const selectedManualRoute = manualRoutes.find((manualRoute) => manualRoute.id === selectedManualRouteId);
+  const hasRouteFocus = selectedRouteSegmentIndex !== null || selectedManualRouteId !== null;
 
   const centerRoute = useCallback(() => {
     const map = mapRef.current;
@@ -413,6 +432,12 @@ export function GpsTrackingView({
 
   const focusRouteSegment = useCallback((segmentIndex: number | null) => {
     setSelectedRouteSegmentIndex(segmentIndex);
+    if (segmentIndex !== null) setSelectedManualRouteId(null);
+  }, []);
+
+  const focusManualRoute = useCallback((routeId: string | null) => {
+    setSelectedManualRouteId(routeId);
+    if (routeId !== null) setSelectedRouteSegmentIndex(null);
   }, []);
 
   const toggleRouteSegmentVisibility = useCallback(
@@ -436,6 +461,20 @@ export function GpsTrackingView({
     [clearEndpointMapSelection, focusRouteSegment, hiddenRouteSegmentIndexSet, selectedRouteSegmentIndex]
   );
 
+  const toggleManualRouteVisibility = useCallback(
+    (routeId: string) => {
+      const isVisible = !hiddenManualRouteIdSet.has(routeId);
+      setHiddenManualRouteIds((current) =>
+        isVisible ? [...current, routeId] : current.filter((id) => id !== routeId)
+      );
+
+      if (isVisible && selectedManualRouteId === routeId) {
+        focusManualRoute(null);
+      }
+    },
+    [focusManualRoute, hiddenManualRouteIdSet, selectedManualRouteId]
+  );
+
   const addManualRouteDraftPoint = useCallback((coordinate: GpxCoordinate) => {
     const currentPoints = manualRouteDraftRef.current;
     const lastPoint = currentPoints.at(-1);
@@ -457,11 +496,12 @@ export function GpsTrackingView({
     endpointMapSelectionRef.current = null;
     setEndpointMapSelection(null);
     focusRouteSegment(null);
+    focusManualRoute(null);
     manualRouteDraftRef.current = [];
     setManualRouteDraft([]);
     isDrawingManualRouteRef.current = true;
     setIsDrawingManualRoute(true);
-  }, [focusRouteSegment, mapReady]);
+  }, [focusManualRoute, focusRouteSegment, mapReady]);
 
   const cancelManualRouteDrawing = useCallback(() => {
     isDrawingManualRouteRef.current = false;
@@ -495,11 +535,12 @@ export function GpsTrackingView({
       addPointModeRef.current = false;
       setIsAddingPoint(false);
       focusRouteSegment(segmentIndex);
+      focusManualRoute(null);
       const selection = { segmentIndex, side };
       endpointMapSelectionRef.current = selection;
       setEndpointMapSelection(selection);
     },
-    [focusRouteSegment, mapReady]
+    [focusManualRoute, focusRouteSegment, mapReady]
   );
 
   const setWaypointMarkersEditing = useCallback((editable: boolean) => {
@@ -681,6 +722,7 @@ export function GpsTrackingView({
 
           if (!endpointMapSelectionRef.current && !isEditingPointsRef.current) {
             focusRouteSegment(null);
+            focusManualRoute(null);
           }
           return;
         }
@@ -712,8 +754,10 @@ export function GpsTrackingView({
       const gpxCoordinates: [number, number][] = [];
       waypointMarkersRef.current = {};
       routeLinesRef.current = {};
+      manualRouteLinesRef.current = {};
       routeBoundaryMarkersRef.current = [];
       routeEndpointMarkersRef.current = [];
+      manualRouteMarkersRef.current = {};
       visibleRouteSegments.forEach((segment) => {
         const coordinates = segment.points.map(
           (point) => [point.latitude, point.longitude] as [number, number]
@@ -773,25 +817,50 @@ export function GpsTrackingView({
         );
         if (coordinates.length < 2) return;
 
-        const color = MANUAL_ROUTE_COLORS[index % MANUAL_ROUTE_COLORS.length];
+        const color = manualRoute.color ?? MANUAL_ROUTE_COLORS[index % MANUAL_ROUTE_COLORS.length];
         allCoordinates.push(...coordinates);
-        leaflet
+        const manualRouteLine = leaflet
           .polyline(coordinates, {
             color,
-            weight: 4,
-            opacity: 0.95,
-            dashArray: "10 8",
+            weight: 5,
+            opacity: 0.9,
             lineCap: "round",
             lineJoin: "round",
-            interactive: false
+            interactive: true
           })
-          .bindTooltip(tooltipText(`Rota manual · ${manualRoute.name}`))
-          .addTo(activeMap);
+          .bindTooltip(
+            tooltipText(
+              `Rota manual · ${manualRoute.name}${departureCopy(manualRoute.departure)}${arrivalCopy(manualRoute.arrivalForecast)}`
+            )
+          );
+        if (!hiddenManualRouteIdSetRef.current.has(manualRoute.id)) {
+          manualRouteLine.addTo(activeMap);
+        }
+        manualRouteLinesRef.current[manualRoute.id] = manualRouteLine;
+
+        manualRouteLine.on("click", (event) => {
+          if (isDrawingManualRouteRef.current) {
+            leaflet.DomEvent.stopPropagation(event.originalEvent);
+            addManualRouteDraftPoint({
+              latitude: event.latlng.lat,
+              longitude: event.latlng.lng
+            });
+            return;
+          }
+
+          routeLineClickRef.current = true;
+          window.setTimeout(() => {
+            routeLineClickRef.current = false;
+          }, 0);
+          leaflet.DomEvent.stopPropagation(event.originalEvent);
+          focusManualRoute(manualRoute.id);
+        });
 
         const start = coordinates[0];
         const destination = coordinates.at(-1);
+        const manualRouteMarkers: import("leaflet").Marker[] = [];
         if (start) {
-          leaflet
+          const startMarker = leaflet
             .marker(start, {
               interactive: false,
               icon: leaflet.divIcon({
@@ -802,10 +871,13 @@ export function GpsTrackingView({
               })
             })
             .bindTooltip(tooltipText(`Rota manual · ${manualRoute.name} · saída`))
-            .addTo(activeMap);
+          if (!hiddenManualRouteIdSetRef.current.has(manualRoute.id)) {
+            startMarker.addTo(activeMap);
+          }
+          manualRouteMarkers.push(startMarker);
         }
         if (destination) {
-          leaflet
+          const destinationMarker = leaflet
             .marker(destination, {
               interactive: false,
               icon: leaflet.divIcon({
@@ -816,8 +888,12 @@ export function GpsTrackingView({
               })
             })
             .bindTooltip(tooltipText(`Rota manual · ${manualRoute.name} · destino`))
-            .addTo(activeMap);
+          if (!hiddenManualRouteIdSetRef.current.has(manualRoute.id)) {
+            destinationMarker.addTo(activeMap);
+          }
+          manualRouteMarkers.push(destinationMarker);
         }
+        manualRouteMarkersRef.current[manualRoute.id] = manualRouteMarkers;
       });
 
       const firstSegment = visibleRouteSegments.at(0);
@@ -958,8 +1034,10 @@ export function GpsTrackingView({
       map?.remove();
       waypointMarkersRef.current = {};
       routeLinesRef.current = {};
+      manualRouteLinesRef.current = {};
       routeBoundaryMarkersRef.current = [];
       routeEndpointMarkersRef.current = [];
+      manualRouteMarkersRef.current = {};
       manualRouteDraftLineRef.current = null;
       manualRoutePreviewLineRef.current = null;
       manualRouteDraftPointLayersRef.current = [];
@@ -983,6 +1061,7 @@ export function GpsTrackingView({
     segmentDetails,
     segmentDisplayLabels,
     focusRouteSegment,
+    focusManualRoute,
     updateTruckMarker,
     visibleRouteSegments
   ]);
@@ -1082,6 +1161,7 @@ export function GpsTrackingView({
     if (!leaflet || !map || !mapReady) return;
 
     const selectedSegmentIndex = selectedRouteSegmentIndex;
+    const hasRouteFocus = selectedSegmentIndex !== null || selectedManualRouteId !== null;
     Object.entries(routeLinesRef.current).forEach(([rawSegmentIndex, routeLine]) => {
       const segmentIndex = Number(rawSegmentIndex);
       const isVisible = !hiddenRouteSegmentIndexSet.has(segmentIndex);
@@ -1093,8 +1173,8 @@ export function GpsTrackingView({
       if (!map.hasLayer(routeLine)) routeLine.addTo(map);
       const isSelected = selectedSegmentIndex === segmentIndex;
       routeLine.setStyle({
-        weight: selectedSegmentIndex === null ? 5 : isSelected ? 9 : 3,
-        opacity: selectedSegmentIndex === null ? 0.9 : isSelected ? 1 : 0.2
+        weight: !hasRouteFocus ? 5 : isSelected ? 9 : 3,
+        opacity: !hasRouteFocus ? 0.9 : isSelected ? 1 : 0.2
       });
     });
     if (
@@ -1161,7 +1241,39 @@ export function GpsTrackingView({
       routeEndpointMarkersRef.current.forEach((marker) => marker.remove());
       routeEndpointMarkersRef.current = [];
     };
-  }, [hiddenRouteSegmentIndexSet, mapReady, route.waypoints, segmentColors, segmentDetails, segmentEndpoints, segmentDisplayLabels, selectedRouteSegmentIndex, visibleRouteSegments]);
+  }, [hiddenRouteSegmentIndexSet, mapReady, route.waypoints, segmentColors, segmentDetails, segmentEndpoints, segmentDisplayLabels, selectedManualRouteId, selectedRouteSegmentIndex, visibleRouteSegments]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const hasRouteFocus = selectedRouteSegmentIndex !== null || selectedManualRouteId !== null;
+    Object.entries(manualRouteLinesRef.current).forEach(([routeId, routeLine]) => {
+      const isVisible = !hiddenManualRouteIdSet.has(routeId);
+      if (!isVisible) {
+        routeLine.remove();
+        manualRouteMarkersRef.current[routeId]?.forEach((marker) => marker.remove());
+        return;
+      }
+
+      if (!map.hasLayer(routeLine)) routeLine.addTo(map);
+      manualRouteMarkersRef.current[routeId]?.forEach((marker) => {
+        if (!map.hasLayer(marker)) marker.addTo(map);
+      });
+      const isSelected = selectedManualRouteId === routeId;
+      routeLine.setStyle({
+        weight: !hasRouteFocus ? 5 : isSelected ? 9 : 3,
+        opacity: !hasRouteFocus ? 0.9 : isSelected ? 1 : 0.2
+      });
+    });
+
+    if (
+      selectedManualRouteId !== null &&
+      !hiddenManualRouteIdSet.has(selectedManualRouteId)
+    ) {
+      manualRouteLinesRef.current[selectedManualRouteId]?.bringToFront();
+    }
+  }, [hiddenManualRouteIdSet, mapReady, selectedManualRouteId, selectedRouteSegmentIndex]);
 
   useEffect(() => stopTracking, [stopTracking]);
 
@@ -1252,12 +1364,20 @@ export function GpsTrackingView({
                 {segmentDisplayLabels[selectedRouteSegmentIndex] ?? routeSegmentLabel(selectedRouteSegmentIndex)}{segmentScheduleCopy(segmentDetails[selectedRouteSegmentIndex])} em primeiro plano — início e fim visíveis.
               </span>
             )}
+            {selectedManualRoute && !endpointMapSelection && (
+              <span className="gps-route-focus-hint" role="status">
+                {selectedManualRoute.name} · Saída às {selectedManualRoute.departure} · Chegada às {selectedManualRoute.arrivalForecast} em primeiro plano.
+              </span>
+            )}
             <div className="gps-map-edit-controls">
-              {selectedRouteSegmentIndex !== null && !isEditingPoints && !endpointMapSelection && (
+              {hasRouteFocus && !isEditingPoints && !endpointMapSelection && (
                 <button
                   className="gps-clear-route-focus-button"
                   type="button"
-                  onClick={() => focusRouteSegment(null)}
+                  onClick={() => {
+                    focusRouteSegment(null);
+                    focusManualRoute(null);
+                  }}
                 >
                   <X size={14} /> Mostrar todos
                 </button>
@@ -1330,7 +1450,7 @@ export function GpsTrackingView({
             </span>
           </div>
           <div
-            className={`gps-map${isAddingPoint ? " is-adding-point" : ""}${isDrawingManualRoute ? " is-drawing-manual-route" : ""}${isEditingPoints ? " is-editing-points" : ""}${endpointMapSelection ? " is-selecting-segment-endpoint" : ""}${selectedRouteSegmentIndex !== null ? " is-focusing-route-segment" : ""}`}
+            className={`gps-map${isAddingPoint ? " is-adding-point" : ""}${isDrawingManualRoute ? " is-drawing-manual-route" : ""}${isEditingPoints ? " is-editing-points" : ""}${endpointMapSelection ? " is-selecting-segment-endpoint" : ""}${hasRouteFocus ? " is-focusing-route-segment" : ""}`}
             ref={mapContainerRef}
             aria-label="Mapa da rota GPS"
           />
@@ -1400,15 +1520,20 @@ export function GpsTrackingView({
             </div>
           </div>
 
-          {visibleRouteSegments.length > 0 && (
+          {(visibleRouteSegments.length > 0 || manualRoutes.length > 0) && (
             <section className="gps-segment-legend" aria-labelledby="gps-segment-legend-title">
               <div className="gps-segment-legend-heading">
-                <h3 id="gps-segment-legend-title">Gravações e cores</h3>
-                <span>{visibleRouteSegments.length} trechos</span>
+                <h3 id="gps-segment-legend-title">Trechos e rotas</h3>
+                <span>
+                  {visibleRouteSegments.length} {visibleRouteSegments.length === 1 ? "trecho" : "trechos"}
+                  {manualRoutes.length
+                    ? ` + ${manualRoutes.length} ${manualRoutes.length === 1 ? "rota manual" : "rotas manuais"}`
+                    : ""}
+                </span>
               </div>
               <p>
-                Marque os trechos que devem aparecer no mapa. Em cada início, defina a saída;
-                em cada fim, defina a chegada. Se não existir um ponto, marque-o diretamente na linha.
+                Use o olho para exibir ou ocultar. Nos trechos GPX, defina início e fim; nas rotas
+                desenhadas, o nome e os horários vêm do planejamento salvo.
               </p>
               <ol>
                 {visibleRouteSegments.map((segment) => {
@@ -1467,6 +1592,49 @@ export function GpsTrackingView({
                         }
                         onMarkEndpoint={(side) => selectSegmentEndpointOnMap(segment.index, side)}
                       />
+                    </li>
+                  );
+                })}
+                {manualRoutes.length > 0 && (
+                  <li className="gps-manual-routes-label" aria-hidden="true">
+                    Rotas desenhadas manualmente
+                  </li>
+                )}
+                {manualRoutes.map((manualRoute, index) => {
+                  const color = manualRoute.color ?? MANUAL_ROUTE_COLORS[index % MANUAL_ROUTE_COLORS.length];
+                  const isRouteVisible = !hiddenManualRouteIdSet.has(manualRoute.id);
+                  const isRouteSelected = selectedManualRouteId === manualRoute.id;
+
+                  return (
+                    <li
+                      className={`gps-recording-item gps-manual-recording-item${isRouteVisible ? " is-visible" : ""}${isRouteSelected ? " is-selected" : ""}`}
+                      key={manualRoute.id}
+                    >
+                      <div className="gps-segment-item-header">
+                        <label className="gps-segment-color-control">
+                          <span className="visually-hidden">Escolher a cor de {manualRoute.name}</span>
+                          <input
+                            type="color"
+                            value={color}
+                            onChange={(event) => onChangeManualRouteColor(manualRoute.id, event.target.value)}
+                          />
+                        </label>
+                        <button
+                          className="gps-segment-visibility-toggle"
+                          type="button"
+                          aria-pressed={isRouteVisible}
+                          onClick={() => toggleManualRouteVisibility(manualRoute.id)}
+                        >
+                          {isRouteVisible ? <Eye size={14} /> : <EyeOff size={14} />}
+                          <span>
+                            <strong>{manualRoute.name}</strong>
+                            <small>{isRouteVisible ? "Exibida no mapa" : "Oculta no mapa"} · Traçado manual</small>
+                          </span>
+                        </button>
+                      </div>
+                      <span className="gps-segment-recording-time">
+                        Saída: {manualRoute.departure} → Chegada: {manualRoute.arrivalForecast}
+                      </span>
                     </li>
                   );
                 })}

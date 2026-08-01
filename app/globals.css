@@ -2768,6 +2768,22 @@ button {
   line-height: 1.3;
 }
 
+.gps-manual-routes-label {
+  margin: 5px 0 -1px;
+  padding: 4px 1px 0;
+  color: #55746d !important;
+  border-top: 1px solid #e2ece9;
+  font-size: 8px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gps-manual-recording-item.is-selected {
+  border-color: #0f766e;
+  box-shadow: 0 4px 10px rgba(15, 118, 110, 0.1);
+}
+
 .gps-recording-item {
   padding: 7px;
   background: #fff;

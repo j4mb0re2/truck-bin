@@ -73,6 +73,7 @@ type TruckRoute = {
   fuelStop?: FuelStop;
   stops: RouteStop[];
   manualPath?: GpxCoordinate[];
+  manualPathColor?: string;
 };
 
 type RouteStatus = "active" | "waiting" | "done";
@@ -230,6 +231,7 @@ function isValidRoute(value: unknown): value is TruckRoute {
         route.fuelStop !== null &&
         typeof route.fuelStop.locationUrl === "string")) &&
     (route.manualPath === undefined || isValidManualPath(route.manualPath)) &&
+    (route.manualPathColor === undefined || isRouteSegmentColor(route.manualPathColor)) &&
     Array.isArray(route.stops) &&
     route.stops.every(isValidStop)
   );
@@ -271,6 +273,9 @@ function migrateRoute(value: unknown): TruckRoute | null {
         latitude: point.latitude,
         longitude: point.longitude
       }))
+      : undefined,
+    manualPathColor: isRouteSegmentColor(legacy.manualPathColor)
+      ? legacy.manualPathColor
       : undefined
   };
 }
@@ -876,6 +881,9 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           ? [{
             id: route.id,
             name: route.name,
+            departure: route.departure,
+            arrivalForecast: route.arrivalForecast,
+            color: route.manualPathColor,
             points: route.manualPath.map((point) => ({
               latitude: point.latitude,
               longitude: point.longitude
@@ -902,7 +910,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       .map((point) => ({ latitude: point.latitude, longitude: point.longitude }));
     if (manualPath.length < 2) return;
 
-    setDraft({ ...emptyRoute(), manualPath });
+    setDraft({ ...emptyRoute(), stops: [], manualPath });
     setGpsFocusPointId(null);
     setViewMode("routes");
     setModalOpen(true);
@@ -926,6 +934,9 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           latitude: point.latitude,
           longitude: point.longitude
         }))
+        : undefined,
+      manualPathColor: isRouteSegmentColor(draft.manualPathColor)
+        ? draft.manualPathColor
         : undefined,
       stops: draft.stops
         .map((stop) => ({
@@ -1192,6 +1203,18 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
       ...current,
       segmentColors: { ...current.segmentColors, [segmentIndex]: color }
     }));
+  }
+
+  function saveManualRouteColor(routeId: string, color: string) {
+    if (!isRouteSegmentColor(color)) return;
+
+    setRoutes((current) =>
+      current.map((route) =>
+        route.id === routeId && isValidManualPath(route.manualPath)
+          ? { ...route, manualPathColor: color }
+          : route
+      )
+    );
   }
 
   function saveGpsSegmentDetails(segmentIndex: number, details: RouteSegmentDetail) {
@@ -1579,6 +1602,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           onEditPoint={openGpsPointEditorById}
           onSavePointPositions={saveGpsPointPositions}
           onChangeSegmentColor={saveGpsSegmentColor}
+          onChangeManualRouteColor={saveManualRouteColor}
           onSaveSegmentDetails={saveGpsSegmentDetails}
           onAssignSegmentEndpoint={saveGpsSegmentEndpoint}
           onCreateSegmentEndpoint={addGpsSegmentEndpointFromMap}
