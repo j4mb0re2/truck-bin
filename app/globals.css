@@ -4087,42 +4087,44 @@ button {
   }
 }
 
-.gps-navigation-bottom-bar {
+/* Round floating exit button at bottom-left */
+.nav-exit-fab {
   position: absolute;
   bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1000;
+  left: 24px;
+  z-index: 1005;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  color: #ffffff;
   display: flex;
   align-items: center;
-  gap: 12px;
-  pointer-events: auto;
-  width: calc(100% - 28px);
-  max-width: 420px;
-}
-
-.hud-exit-large-button {
-  width: 100%;
-  height: 48px;
-  display: inline-flex;
-  align-items: center;
   justify-content: center;
-  gap: 8px;
-  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-  color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 14px;
-  font-size: 14px;
-  font-weight: 800;
   cursor: pointer;
-  box-shadow: 0 10px 30px rgba(239, 68, 68, 0.4);
-  transition: all 0.2s ease;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: auto;
 }
 
-.hud-exit-large-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 35px rgba(239, 68, 68, 0.5);
-  background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
+.nav-exit-fab:hover,
+.nav-exit-fab:active {
+  background: rgba(225, 29, 72, 0.9);
+  border-color: rgba(255, 255, 255, 0.5);
+  color: #ffffff;
+  transform: scale(1.08);
+}
+
+@media (max-width: 640px) {
+  .nav-exit-fab {
+    bottom: 16px;
+    left: 16px;
+    width: 48px;
+    height: 48px;
+  }
 }
 
 /* Integrated Route Segments in Minhas Rotas */

@@ -2068,14 +2068,6 @@ export function GpsTrackingView({
             >
               <Crosshair size={16} /> Centralizar
             </button>
-            <button
-              className="hud-button hud-exit"
-              type="button"
-              onClick={onExitNavigation || onBack}
-              title="Sair da Navegação"
-            >
-              <X size={16} /> Sair
-            </button>
           </div>
         </div>
 
@@ -2089,15 +2081,16 @@ export function GpsTrackingView({
           </div>
         </section>
 
-        <div className="gps-navigation-bottom-bar">
-          <button
-            className="hud-exit-large-button"
-            type="button"
-            onClick={onExitNavigation || onBack}
-          >
-            <X size={18} /> Encerrar Navegação
-          </button>
-        </div>
+        {/* Botão redondo minimalista de Encerrar Navegação no canto inferior esquerdo */}
+        <button
+          className="nav-exit-fab"
+          type="button"
+          aria-label="Encerrar Navegação"
+          title="Encerrar Navegação"
+          onClick={onExitNavigation || onBack}
+        >
+          <X size={26} />
+        </button>
       </main>
     );
   }
