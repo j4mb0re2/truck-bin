@@ -2051,23 +2051,6 @@ export function GpsTrackingView({
               {mapLayerType === "satellite" ? <Layers size={16} /> : <Globe size={16} />}
               {mapLayerType === "satellite" ? "Modo Ruas" : "Modo Satélite"}
             </button>
-            <button
-              className="hud-button hud-recenter"
-              type="button"
-              onClick={() => {
-                if (mapRef.current && livePositionRef.current) {
-                  mapRef.current.flyTo(
-                    [livePositionRef.current.latitude, livePositionRef.current.longitude],
-                    16
-                  );
-                } else {
-                  centerRoute();
-                }
-              }}
-              title="Centralizar no caminhão"
-            >
-              <Crosshair size={16} /> Centralizar
-            </button>
           </div>
         </div>
 
@@ -2090,6 +2073,26 @@ export function GpsTrackingView({
           onClick={onExitNavigation || onBack}
         >
           <X size={26} />
+        </button>
+
+        {/* Botão redondo minimalista de Centralizar no canto inferior direito */}
+        <button
+          className="nav-recenter-fab"
+          type="button"
+          aria-label="Centralizar no caminhão"
+          title="Centralizar no caminhão"
+          onClick={() => {
+            if (mapRef.current && livePositionRef.current) {
+              mapRef.current.flyTo(
+                [livePositionRef.current.latitude, livePositionRef.current.longitude],
+                16
+              );
+            } else {
+              centerRoute();
+            }
+          }}
+        >
+          <Crosshair size={24} />
         </button>
       </main>
     );

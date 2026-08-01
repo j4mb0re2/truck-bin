@@ -4087,7 +4087,7 @@ button {
   }
 }
 
-/* Round floating exit button at bottom-left */
+/* Round floating exit button at bottom-left with vivid red fill */
 .nav-exit-fab {
   position: absolute;
   bottom: 24px;
@@ -4096,11 +4096,40 @@ button {
   width: 52px;
   height: 52px;
   border-radius: 50%;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  border: 1.5px solid rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 10px 25px rgba(220, 38, 38, 0.5);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: auto;
+}
+
+.nav-exit-fab:hover,
+.nav-exit-fab:active {
+  background: linear-gradient(135deg, #f87171 0%, #b91c1c 100%);
+  border-color: rgba(255, 255, 255, 0.6);
+  transform: scale(1.08);
+  box-shadow: 0 12px 30px rgba(220, 38, 38, 0.6);
+}
+
+/* Round floating recenter button at bottom-right */
+.nav-recenter-fab {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  z-index: 1005;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
   background: rgba(15, 23, 42, 0.85);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1.5px solid rgba(255, 255, 255, 0.25);
-  color: #ffffff;
+  color: #38bdf8;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4110,9 +4139,9 @@ button {
   pointer-events: auto;
 }
 
-.nav-exit-fab:hover,
-.nav-exit-fab:active {
-  background: rgba(225, 29, 72, 0.9);
+.nav-recenter-fab:hover,
+.nav-recenter-fab:active {
+  background: rgba(14, 165, 233, 0.9);
   border-color: rgba(255, 255, 255, 0.5);
   color: #ffffff;
   transform: scale(1.08);
@@ -4122,6 +4151,13 @@ button {
   .nav-exit-fab {
     bottom: 16px;
     left: 16px;
+    width: 48px;
+    height: 48px;
+  }
+
+  .nav-recenter-fab {
+    bottom: 16px;
+    right: 16px;
     width: 48px;
     height: 48px;
   }
