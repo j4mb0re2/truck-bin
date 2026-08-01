@@ -885,15 +885,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     }
   }, [gpsPointCatalog, gpsPointConfigs, navigationMode, ready, routes]);
 
-  const counts = useMemo(() => {
-    return routes.reduce(
-      (acc, route) => {
-        acc[getStatus(route, nowMinutes)] += 1;
-        return acc;
-      },
-      { active: 0, waiting: 0, done: 0 }
-    );
-  }, [routes, nowMinutes]);
+
 
 
   const unifiedRouteItems = useMemo(() => {
@@ -2089,33 +2081,6 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
             </button>
           </div>
         </header>
-
-        <section className="stats-grid" aria-label="Resumo das rotas">
-          <article className="stat-card stat-total">
-            <div className="stat-icon"><Truck size={22} /></div>
-            <div>
-              <span>Rotas cadastradas</span>
-              <strong>{routes.length}</strong>
-            </div>
-            <span className="stat-note">programadas</span>
-          </article>
-          <article className="stat-card stat-progress">
-            <div className="stat-icon"><ArrowRight size={22} /></div>
-            <div>
-              <span>Em andamento</span>
-              <strong>{counts.active}</strong>
-            </div>
-            <div className="pulse-label"><i /> ao vivo</div>
-          </article>
-          <article className="stat-card stat-complete">
-            <div className="stat-icon"><CheckCircle2 size={22} /></div>
-            <div>
-              <span>Concluídas</span>
-              <strong>{counts.done}</strong>
-            </div>
-            <span className="stat-note">finalizadas</span>
-          </article>
-        </section>
 
         <section className="dashboard-grid">
           <div className="routes-panel panel">
