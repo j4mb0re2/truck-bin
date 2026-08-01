@@ -5,11 +5,14 @@ import {
   Crosshair,
   MapPinned,
   Navigation,
+  Pencil,
   Plus,
   Radio,
   Route,
   Satellite,
-  TriangleAlert
+  Save,
+  TriangleAlert,
+  X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GpxCoordinate, GpxRouteData } from "../lib/gpx-route";
@@ -18,6 +21,7 @@ import {
   routeSegmentColor,
   routeSegmentLabel
 } from "../lib/route-segment-utils";
+import type { RouteSegmentColors } from "../lib/route-segment-utils";
 
 type GpsState = "idle" | "searching" | "tracking" | "error";
 type LivePosition = {
@@ -32,6 +36,23 @@ function formatWaypointTime(time: string, description: string) {
   const fromDescription = description.match(/\b(\d{2}:\d{2})(?::\d{2})?\b/)?.[1];
   if (fromDescription) return fromDescription;
   return time ? time.slice(11, 16) : "Ponto GPS";
+}
+
+function formatRecordingTime(time: string) {
+  const timestamp = Date.parse(time);
+  if (!Number.isFinite(timestamp)) return "Não informado";
+
+  return new Date(timestamp).toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function isSameCoordinate(first: GpxCoordinate, second: GpxCoordinate) {
+  return (
+    Math.abs(first.latitude - second.latitude) < 0.0000001 &&
+    Math.abs(first.longitude - second.longitude) < 0.0000001
+  );
 }
 
 function gpsErrorMessage(error: GeolocationPositionError) {
@@ -54,17 +75,23 @@ export function GpsTrackingView({
   route,
   pointStepCounts,
   pointSegmentIndexes,
+  segmentColors,
   initialWaypointId,
   onAddPoint,
   onEditPoint,
+  onSavePointPositions,
+  onChangeSegmentColor,
   onBack
 }: {
   route: GpxRouteData;
   pointStepCounts: Record<string, number>;
   pointSegmentIndexes: Record<string, number>;
+  segmentColors: RouteSegmentColors;
   initialWaypointId: string | null;
   onAddPoint: (coordinate: GpxCoordinate) => void;
   onEditPoint: (pointId: string) => void;
+  onSavePointPositions: (positions: Record<string, GpxCoordinate>) => void;
+  onChangeSegmentColor: (segmentIndex: number, color: string) => void;
   onBack: () => void;
 }) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -77,12 +104,19 @@ export function GpsTrackingView({
   const livePositionRef = useRef<LivePosition | null>(null);
   const onAddPointRef = useRef(onAddPoint);
   const onEditPointRef = useRef(onEditPoint);
+  const onSavePointPositionsRef = useRef(onSavePointPositions);
   const addPointModeRef = useRef(false);
+  const isEditingPointsRef = useRef(false);
+  const waypointMarkersRef = useRef<Record<string, import("leaflet").Marker>>({});
+  const pointPositionEditsRef = useRef<Record<string, GpxCoordinate>>({});
+  const originalPointPositionsRef = useRef<Record<string, GpxCoordinate>>({});
   const [mapReady, setMapReady] = useState(false);
   const [gpsState, setGpsState] = useState<GpsState>("idle");
   const [gpsMessage, setGpsMessage] = useState("GPS desligado — ative para localizar o caminhão.");
   const [livePosition, setLivePosition] = useState<LivePosition | null>(null);
   const [isAddingPoint, setIsAddingPoint] = useState(false);
+  const [isEditingPoints, setIsEditingPoints] = useState(false);
+  const [pendingPointPositionCount, setPendingPointPositionCount] = useState(0);
 
   useEffect(() => {
     onAddPointRef.current = onAddPoint;
@@ -91,6 +125,10 @@ export function GpsTrackingView({
   useEffect(() => {
     onEditPointRef.current = onEditPoint;
   }, [onEditPoint]);
+
+  useEffect(() => {
+    onSavePointPositionsRef.current = onSavePointPositions;
+  }, [onSavePointPositions]);
 
   useEffect(() => {
     addPointModeRef.current = isAddingPoint;
@@ -121,12 +159,63 @@ export function GpsTrackingView({
   }, []);
 
   const toggleAddPointMode = useCallback(() => {
+    if (isEditingPointsRef.current) return;
+
     setIsAddingPoint((currentMode) => {
       const nextMode = !currentMode;
       addPointModeRef.current = nextMode;
       return nextMode;
     });
   }, []);
+
+  const setWaypointMarkersEditing = useCallback((editable: boolean) => {
+    Object.values(waypointMarkersRef.current).forEach((marker) => {
+      if (editable) marker.dragging?.enable();
+      else marker.dragging?.disable();
+    });
+  }, []);
+
+  const startPointEditing = useCallback(() => {
+    if (!mapReady) return;
+
+    addPointModeRef.current = false;
+    setIsAddingPoint(false);
+    pointPositionEditsRef.current = {};
+    originalPointPositionsRef.current = Object.fromEntries(
+      Object.entries(waypointMarkersRef.current).map(([pointId, marker]) => {
+        const position = marker.getLatLng();
+        return [pointId, { latitude: position.lat, longitude: position.lng }];
+      })
+    );
+    isEditingPointsRef.current = true;
+    setWaypointMarkersEditing(true);
+    setPendingPointPositionCount(0);
+    setIsEditingPoints(true);
+  }, [mapReady, setWaypointMarkersEditing]);
+
+  const cancelPointEditing = useCallback(() => {
+    Object.entries(originalPointPositionsRef.current).forEach(([pointId, position]) => {
+      waypointMarkersRef.current[pointId]?.setLatLng([position.latitude, position.longitude]);
+    });
+    setWaypointMarkersEditing(false);
+    pointPositionEditsRef.current = {};
+    originalPointPositionsRef.current = {};
+    isEditingPointsRef.current = false;
+    setPendingPointPositionCount(0);
+    setIsEditingPoints(false);
+  }, [setWaypointMarkersEditing]);
+
+  const savePointEditing = useCallback(() => {
+    const positions = { ...pointPositionEditsRef.current };
+    if (Object.keys(positions).length) onSavePointPositionsRef.current(positions);
+
+    setWaypointMarkersEditing(false);
+    pointPositionEditsRef.current = {};
+    originalPointPositionsRef.current = {};
+    isEditingPointsRef.current = false;
+    setPendingPointPositionCount(0);
+    setIsEditingPoints(false);
+  }, [setWaypointMarkersEditing]);
 
   const updateTruckMarker = useCallback(
     (position: Pick<LivePosition, "latitude" | "longitude" | "accuracy">) => {
@@ -167,7 +256,9 @@ export function GpsTrackingView({
         accuracyCircleRef.current.setRadius(accuracy);
       }
 
-      map.flyTo(coordinates, Math.max(map.getZoom(), 15), { duration: 0.65 });
+      if (!isEditingPointsRef.current) {
+        map.flyTo(coordinates, Math.max(map.getZoom(), 15), { duration: 0.65 });
+      }
     },
     []
   );
@@ -249,11 +340,12 @@ export function GpsTrackingView({
       activeMap.on("click", onMapClick);
 
       const allCoordinates: [number, number][] = [];
+      waypointMarkersRef.current = {};
       visibleRouteSegments.forEach((segment) => {
         const coordinates = segment.points.map(
           (point) => [point.latitude, point.longitude] as [number, number]
         );
-        const color = routeSegmentColor(segment.index);
+        const color = routeSegmentColor(segment.index, segmentColors);
         allCoordinates.push(...coordinates);
         leaflet
           .polyline(coordinates, {
@@ -275,7 +367,7 @@ export function GpsTrackingView({
           .marker(firstPoint, {
             icon: leaflet.divIcon({
               className: "gps-route-marker gps-start-marker has-route-segment",
-              html: `<span style="--route-point-color:${routeSegmentColor(firstSegment?.index ?? 0)}">Início</span>`,
+              html: `<span style="--route-point-color:${routeSegmentColor(firstSegment?.index ?? 0, segmentColors)}">Início</span>`,
               iconSize: [58, 30],
               iconAnchor: [29, 15]
             })
@@ -288,7 +380,7 @@ export function GpsTrackingView({
           .marker(lastPoint, {
             icon: leaflet.divIcon({
               className: "gps-route-marker gps-end-marker has-route-segment",
-              html: `<span style="--route-point-color:${routeSegmentColor(lastSegment?.index ?? 0)}">Fim</span>`,
+              html: `<span style="--route-point-color:${routeSegmentColor(lastSegment?.index ?? 0, segmentColors)}">Fim</span>`,
               iconSize: [46, 30],
               iconAnchor: [23, 15]
             })
@@ -301,11 +393,16 @@ export function GpsTrackingView({
         const stepCount = pointStepCounts[point.id] ?? 0;
         const segmentIndex = pointSegmentIndexes[point.id];
         const segmentColor =
-          segmentIndex === undefined ? undefined : routeSegmentColor(segmentIndex);
+          segmentIndex === undefined
+            ? undefined
+            : routeSegmentColor(segmentIndex, segmentColors);
         const segmentLabel =
           segmentIndex === undefined ? "" : ` · ${routeSegmentLabel(segmentIndex)}`;
+        const editedPosition = pointPositionEditsRef.current[point.id];
+        const markerPosition = editedPosition ?? point;
         const waypointMarker = leaflet
-          .marker([point.latitude, point.longitude], {
+          .marker([markerPosition.latitude, markerPosition.longitude], {
+            draggable: false,
             icon: leaflet.divIcon({
               className: `gps-waypoint-marker${segmentColor ? " has-route-segment" : ""}${point.id === initialWaypointId ? " is-focused" : ""}${stepCount ? " has-steps" : ""}`,
               html: `<span${segmentColor ? ` style="--route-point-color:${segmentColor}"` : ""}>${index + 1}</span>`,
@@ -320,8 +417,30 @@ export function GpsTrackingView({
           )
           .addTo(activeMap);
 
+        waypointMarkersRef.current[point.id] = waypointMarker;
+        if (isEditingPointsRef.current) waypointMarker.dragging?.enable();
+
+        waypointMarker.on("dragend", () => {
+          if (!isEditingPointsRef.current) return;
+
+          const position = waypointMarker.getLatLng();
+          const nextPosition = { latitude: position.lat, longitude: position.lng };
+          const originalPosition = originalPointPositionsRef.current[point.id] ?? {
+            latitude: point.latitude,
+            longitude: point.longitude
+          };
+
+          if (isSameCoordinate(nextPosition, originalPosition)) {
+            delete pointPositionEditsRef.current[point.id];
+          } else {
+            pointPositionEditsRef.current[point.id] = nextPosition;
+          }
+          setPendingPointPositionCount(Object.keys(pointPositionEditsRef.current).length);
+        });
+
         waypointMarker.on("click", (event) => {
           leaflet.DomEvent.stopPropagation(event.originalEvent);
+          if (isEditingPointsRef.current) return;
           if (addPointModeRef.current) {
             addPointModeRef.current = false;
             setIsAddingPoint(false);
@@ -352,15 +471,17 @@ export function GpsTrackingView({
       disposed = true;
       if (map && onMapClick) map.off("click", onMapClick);
       map?.remove();
+      waypointMarkersRef.current = {};
       if (mapRef.current === map) {
         mapRef.current = null;
         truckMarkerRef.current = null;
         accuracyCircleRef.current = null;
+        routeBoundsRef.current = null;
       }
       if (mapRef.current === null) leafletRef.current = null;
       setMapReady(false);
     };
-  }, [initialWaypoint, initialWaypointId, pointSegmentIndexes, pointStepCounts, route, updateTruckMarker, visibleRouteSegments]);
+  }, [initialWaypoint, initialWaypointId, pointSegmentIndexes, pointStepCounts, route, segmentColors, updateTruckMarker, visibleRouteSegments]);
 
   useEffect(() => stopTracking, [stopTracking]);
 
@@ -381,7 +502,7 @@ export function GpsTrackingView({
           <button
             className={`secondary-button gps-add-point-button ${isAddingPoint ? "is-active" : ""}`}
             type="button"
-            disabled={!mapReady}
+            disabled={!mapReady || isEditingPoints}
             aria-pressed={isAddingPoint}
             onClick={toggleAddPointMode}
           >
@@ -411,10 +532,41 @@ export function GpsTrackingView({
                 Clique no mapa para adicionar o ponto.
               </span>
             )}
+            {isEditingPoints && (
+              <span className="gps-edit-points-hint" role="status">
+                Arraste os pontos numerados. A linha GPX não muda.
+              </span>
+            )}
+            <div className="gps-map-edit-controls">
+              {isEditingPoints ? (
+                <>
+                  <button className="gps-cancel-points-button" type="button" onClick={cancelPointEditing}>
+                    <X size={14} /> Cancelar
+                  </button>
+                  <button
+                    className="gps-save-points-button"
+                    type="button"
+                    onClick={savePointEditing}
+                    disabled={!pendingPointPositionCount}
+                  >
+                    <Save size={14} /> {pendingPointPositionCount ? `Salvar (${pendingPointPositionCount})` : "Salvar"}
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="gps-edit-points-button"
+                  type="button"
+                  disabled={!mapReady}
+                  onClick={startPointEditing}
+                >
+                  <Pencil size={14} /> Editar pontos
+                </button>
+              )}
+            </div>
             <span className="gps-map-points">{route.totalTrackPoints.toLocaleString("pt-BR")} pontos GPX</span>
           </div>
           <div
-            className={`gps-map${isAddingPoint ? " is-adding-point" : ""}`}
+            className={`gps-map${isAddingPoint ? " is-adding-point" : ""}${isEditingPoints ? " is-editing-points" : ""}`}
             ref={mapContainerRef}
             aria-label="Mapa da rota GPS"
           />
@@ -477,22 +629,30 @@ export function GpsTrackingView({
             </div>
           </div>
 
-          {visibleRouteSegments.length > 1 && (
+          {visibleRouteSegments.length > 0 && (
             <section className="gps-segment-legend" aria-labelledby="gps-segment-legend-title">
               <div className="gps-segment-legend-heading">
-                <h3 id="gps-segment-legend-title">Pausas e retomadas</h3>
+                <h3 id="gps-segment-legend-title">Gravações e cores</h3>
                 <span>{visibleRouteSegments.length} trechos</span>
               </div>
-              <p>As cores do mapa mudam quando o GPS voltou a gravar a rota.</p>
+              <p>Defina a cor do traçado e dos pontos ligados a cada gravação.</p>
               <ol>
                 {visibleRouteSegments.map((segment) => (
-                  <li key={segment.index}>
-                    <span
-                      className="gps-segment-swatch"
-                      style={{ backgroundColor: routeSegmentColor(segment.index) }}
-                      aria-hidden="true"
-                    />
-                    <span>{routeSegmentLabel(segment.index)}</span>
+                  <li className="gps-recording-item" key={segment.index}>
+                    <label className="gps-segment-color-control">
+                      <span className="visually-hidden">Escolher a cor do trecho {segment.index + 1}</span>
+                      <input
+                        type="color"
+                        value={routeSegmentColor(segment.index, segmentColors)}
+                        onChange={(event) => onChangeSegmentColor(segment.index, event.target.value)}
+                      />
+                    </label>
+                    <div>
+                      <strong>Trecho {segment.index + 1}</strong>
+                      <span>
+                        Gravação: {formatRecordingTime(segment.timing.startTime)} → {formatRecordingTime(segment.timing.endTime)}
+                      </span>
+                    </div>
                   </li>
                 ))}
               </ol>

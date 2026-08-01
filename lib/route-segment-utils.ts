@@ -8,6 +8,8 @@ export type RouteSegmentTiming = {
   endTime: string;
 };
 
+export type RouteSegmentColors = Record<number, string>;
+
 export type RenderedRouteSegment = {
   index: number;
   points: RouteCoordinate[];
@@ -30,8 +32,14 @@ export const ROUTE_SEGMENT_COLORS = [
   "#5f7185"
 ] as const;
 
-export function routeSegmentColor(index: number) {
+export function isRouteSegmentColor(value: unknown): value is string {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
+}
+
+export function routeSegmentColor(index: number, customColors: RouteSegmentColors = {}) {
   const safeIndex = Number.isFinite(index) ? Math.abs(Math.trunc(index)) : 0;
+  const customColor = customColors[safeIndex];
+  if (isRouteSegmentColor(customColor)) return customColor;
   return ROUTE_SEGMENT_COLORS[safeIndex % ROUTE_SEGMENT_COLORS.length];
 }
 

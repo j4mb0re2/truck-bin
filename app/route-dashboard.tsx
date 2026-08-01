@@ -33,10 +33,12 @@ import type { CSSProperties } from "react";
 import { GpsTrackingView } from "./gps-tracking-view";
 import type { GpxCoordinate, GpxRouteData, GpxWaypoint } from "../lib/gpx-route";
 import {
+  isRouteSegmentColor,
   matchPointToRouteSegment,
   routeSegmentColor,
   routeSegmentLabel
 } from "../lib/route-segment-utils";
+import type { RouteSegmentColors } from "../lib/route-segment-utils";
 
 type StopType = "stage" | "taiki" | "lunch";
 type StageOperation = "loading" | "unloading";
@@ -83,6 +85,8 @@ type GpsPointCatalog = {
   pointOrder: string[];
   pointNames: Record<string, string>;
   manualPoints: GpxWaypoint[];
+  pointCoordinates: Record<string, GpxCoordinate>;
+  segmentColors: RouteSegmentColors;
 };
 type ResolvedGpsPoint = GpxWaypoint & {
   source: "gpx" | "manual";
@@ -109,11 +113,13 @@ const STORAGE_KEY = "roteiro-truck-routes-v1";
 const FIXED_POINTS_KEY = "roteiro-truck-fixed-points-v1";
 const GPS_POINT_CONFIGS_KEY = "roteiro-truck-gps-point-configs-v1";
 const GPS_POINTS_KEY = "roteiro-truck-gps-points-v1";
-const BACKUP_VERSION = 4;
+const BACKUP_VERSION = 5;
 const EMPTY_GPS_POINT_CATALOG: GpsPointCatalog = {
   pointOrder: [],
   pointNames: {},
-  manualPoints: []
+  manualPoints: [],
+  pointCoordinates: {},
+  segmentColors: {}
 };
 
 type BackupMessage = {
@@ -146,19 +152,30 @@ function cryptoId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function isValidGpsWaypoint(value: unknown): value is GpxWaypoint {
+function isValidGpsCoordinate(value: unknown): value is GpxCoordinate {
   if (!value || typeof value !== "object") return false;
+  const point = value as Partial<GpxCoordinate>;
+  return (
+    typeof point.latitude === "number" &&
+    Number.isFinite(point.latitude) &&
+    point.latitude >= -90 &&
+    point.latitude <= 90 &&
+    typeof point.longitude === "number" &&
+    Number.isFinite(point.longitude) &&
+    point.longitude >= -180 &&
+    point.longitude <= 180
+  );
+}
+
+function isValidGpsWaypoint(value: unknown): value is GpxWaypoint {
+  if (!value || typeof value !== "object" || !isValidGpsCoordinate(value)) return false;
   const point = value as Partial<GpxWaypoint>;
   return (
     typeof point.id === "string" &&
     point.id.length > 0 &&
     typeof point.name === "string" &&
     typeof point.description === "string" &&
-    typeof point.time === "string" &&
-    typeof point.latitude === "number" &&
-    Number.isFinite(point.latitude) &&
-    typeof point.longitude === "number" &&
-    Number.isFinite(point.longitude)
+    typeof point.time === "string"
   );
 }
 
@@ -314,6 +331,40 @@ function normalizeGpsPointCatalog(value: unknown): GpsPointCatalog {
       }, {})
       : {};
 
+  const pointCoordinates =
+    catalog.pointCoordinates &&
+    typeof catalog.pointCoordinates === "object" &&
+    !Array.isArray(catalog.pointCoordinates)
+      ? Object.entries(catalog.pointCoordinates).reduce<Record<string, GpxCoordinate>>(
+        (coordinates, [pointId, coordinate]) => {
+          if (pointId && isValidGpsCoordinate(coordinate)) {
+            coordinates[pointId] = {
+              latitude: coordinate.latitude,
+              longitude: coordinate.longitude
+            };
+          }
+          return coordinates;
+        },
+        {}
+      )
+      : {};
+
+  const segmentColors =
+    catalog.segmentColors &&
+    typeof catalog.segmentColors === "object" &&
+    !Array.isArray(catalog.segmentColors)
+      ? Object.entries(catalog.segmentColors).reduce<RouteSegmentColors>(
+        (colors, [segmentIndex, color]) => {
+          const index = Number(segmentIndex);
+          if (Number.isInteger(index) && index >= 0 && isRouteSegmentColor(color)) {
+            colors[index] = color;
+          }
+          return colors;
+        },
+        {}
+      )
+      : {};
+
   const seenOrderIds = new Set<string>();
   const pointOrder = Array.isArray(catalog.pointOrder)
     ? catalog.pointOrder.filter((id): id is string => {
@@ -323,7 +374,7 @@ function normalizeGpsPointCatalog(value: unknown): GpsPointCatalog {
     })
     : [];
 
-  return { manualPoints, pointNames, pointOrder };
+  return { manualPoints, pointNames, pointCoordinates, pointOrder, segmentColors };
 }
 
 function getGpsPointOrder(gpxPoints: GpxWaypoint[], catalog: GpsPointCatalog) {
@@ -347,11 +398,15 @@ function resolveGpsPoints(
   const points = [
     ...gpxPoints.map((point) => ({
       ...point,
+      latitude: catalog.pointCoordinates[point.id]?.latitude ?? point.latitude,
+      longitude: catalog.pointCoordinates[point.id]?.longitude ?? point.longitude,
       name: catalog.pointNames[point.id]?.trim() || point.name,
       source: "gpx" as const
     })),
     ...catalog.manualPoints.map((point) => ({
       ...point,
+      latitude: catalog.pointCoordinates[point.id]?.latitude ?? point.latitude,
+      longitude: catalog.pointCoordinates[point.id]?.longitude ?? point.longitude,
       name: catalog.pointNames[point.id]?.trim() || point.name,
       source: "manual" as const
     }))
@@ -866,15 +921,48 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
         pointOrder.length + 1
       );
       pointOrder.splice(nextPosition - 1, 0, savedPoint.id);
+      const pointCoordinates = { ...current.pointCoordinates };
+      if (draftToSave.point.source === "manual") delete pointCoordinates[savedPoint.id];
 
       return {
+        ...current,
         manualPoints,
         pointNames: { ...current.pointNames, [savedPoint.id]: cleanedName },
+        pointCoordinates,
         pointOrder
       };
     });
     setGpsFocusPointId(savedPoint.id);
     setGpsPointEditDraft(null);
+  }
+
+  function saveGpsPointPositions(changes: Record<string, GpxCoordinate>) {
+    const knownPointIds = new Set(gpsPoints.map((point) => point.id));
+
+    setGpsPointCatalog((current) => {
+      const pointCoordinates = { ...current.pointCoordinates };
+
+      Object.entries(changes).forEach(([pointId, coordinate]) => {
+        if (!knownPointIds.has(pointId) || !isValidGpsCoordinate(coordinate)) return;
+        pointCoordinates[pointId] = {
+          latitude: coordinate.latitude,
+          longitude: coordinate.longitude
+        };
+      });
+
+      return { ...current, pointCoordinates };
+    });
+  }
+
+  function saveGpsSegmentColor(segmentIndex: number, color: string) {
+    if (!Number.isInteger(segmentIndex) || segmentIndex < 0 || !isRouteSegmentColor(color)) {
+      return;
+    }
+
+    setGpsPointCatalog((current) => ({
+      ...current,
+      segmentColors: { ...current.segmentColors, [segmentIndex]: color }
+    }));
   }
 
   function reorderGpsPoints(activeId: string, overId: string) {
@@ -1090,9 +1178,12 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           route={gpsRouteForView}
           pointStepCounts={gpsPointStepCounts}
           pointSegmentIndexes={gpsPointSegmentIndexes}
+          segmentColors={gpsPointCatalog.segmentColors}
           initialWaypointId={gpsFocusPointId}
           onAddPoint={addGpsPointFromMap}
           onEditPoint={openGpsPointEditorById}
+          onSavePointPositions={saveGpsPointPositions}
+          onChangeSegmentColor={saveGpsSegmentColor}
           onBack={() => {
             setViewMode("routes");
             setGpsFocusPointId(null);
@@ -1292,7 +1383,9 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                     const config = gpsPointConfigs[point.id];
                     const segmentIndex = gpsPointSegmentIndexes[point.id];
                     const segmentColor =
-                      segmentIndex === undefined ? undefined : routeSegmentColor(segmentIndex);
+                      segmentIndex === undefined
+                        ? undefined
+                        : routeSegmentColor(segmentIndex, gpsPointCatalog.segmentColors);
                     const segmentLabel =
                       segmentIndex === undefined ? "" : routeSegmentLabel(segmentIndex);
                     const isDraggingPoint = gpsPointDrag?.activeId === point.id;
@@ -2525,7 +2618,7 @@ function BackupModal({
               <strong>Um arquivo, toda a configuração</strong>
               <p>
                 O backup inclui pontos fixos, rotas, horários, stages, taikis,
-                almoços, configurações, nomes e ordem dos pontos GPS.
+                almoços, configurações, nomes, posições e cores dos pontos GPS.
               </p>
             </div>
           </div>
