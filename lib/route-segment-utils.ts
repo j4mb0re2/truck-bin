@@ -19,6 +19,13 @@ export type RouteSegmentEndpoint = {
 
 export type RouteSegmentEndpoints = Record<number, RouteSegmentEndpoint>;
 
+export type RouteSegmentDetail = {
+  name?: string;
+  departureTime?: string;
+};
+
+export type RouteSegmentDetails = Record<number, RouteSegmentDetail>;
+
 export type RenderedRouteSegment = {
   index: number;
   points: RouteCoordinate[];
@@ -45,6 +52,10 @@ export function isRouteSegmentColor(value: unknown): value is string {
   return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
 }
 
+export function isRouteSegmentDepartureTime(value: unknown): value is string {
+  return typeof value === "string" && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
 export function routeSegmentColor(index: number, customColors: RouteSegmentColors = {}) {
   const safeIndex = Number.isFinite(index) ? Math.abs(Math.trunc(index)) : 0;
   const customColor = customColors[safeIndex];
@@ -59,18 +70,9 @@ export function routeSegmentLabel(index: number) {
 
 export function routeSegmentDisplayLabel(
   index: number,
-  segmentEndpoints: RouteSegmentEndpoints = {},
-  points: ReadonlyArray<{ id: string; name: string }> = []
+  segmentDetails: RouteSegmentDetails = {}
 ) {
-  const endpoints = segmentEndpoints[index];
-  if (!endpoints) return routeSegmentLabel(index);
-
-  const pointsById = new Map(points.map((point) => [point.id, point.name.trim()]));
-  const startName = endpoints.startPointId ? pointsById.get(endpoints.startPointId) : "";
-  const endName = endpoints.endPointId ? pointsById.get(endpoints.endPointId) : "";
-
-  if (startName && endName && startName !== endName) return `${startName} → ${endName}`;
-  return startName || endName || routeSegmentLabel(index);
+  return segmentDetails[index]?.name?.trim() || routeSegmentLabel(index);
 }
 
 export function getRenderedRouteSegments(

@@ -34,12 +34,15 @@ import { GpsTrackingView } from "./gps-tracking-view";
 import type { GpxCoordinate, GpxRouteData, GpxWaypoint } from "../lib/gpx-route";
 import {
   isRouteSegmentColor,
+  isRouteSegmentDepartureTime,
   matchPointToRouteSegment,
   routeSegmentColor,
   routeSegmentDisplayLabel
 } from "../lib/route-segment-utils";
 import type {
   RouteSegmentColors,
+  RouteSegmentDetail,
+  RouteSegmentDetails,
   RouteSegmentEndpoints,
   SegmentEndpointSide
 } from "../lib/route-segment-utils";
@@ -92,8 +95,13 @@ type GpsPointCatalog = {
   manualPoints: GpxWaypoint[];
   pointCoordinates: Record<string, GpxCoordinate>;
   segmentColors: RouteSegmentColors;
+  segmentDetails: RouteSegmentDetails;
   segmentEndpoints: RouteSegmentEndpoints;
 };
+type GpsPointSourceCatalog = Pick<
+  GpsPointCatalog,
+  "manualPoints" | "pointCoordinates" | "pointNames" | "pointOrder"
+>;
 type ResolvedGpsPoint = GpxWaypoint & {
   source: "gpx" | "manual";
 };
@@ -123,13 +131,14 @@ const STORAGE_KEY = "roteiro-truck-routes-v1";
 const FIXED_POINTS_KEY = "roteiro-truck-fixed-points-v1";
 const GPS_POINT_CONFIGS_KEY = "roteiro-truck-gps-point-configs-v1";
 const GPS_POINTS_KEY = "roteiro-truck-gps-points-v1";
-const BACKUP_VERSION = 7;
+const BACKUP_VERSION = 8;
 const EMPTY_GPS_POINT_CATALOG: GpsPointCatalog = {
   pointOrder: [],
   pointNames: {},
   manualPoints: [],
   pointCoordinates: {},
   segmentColors: {},
+  segmentDetails: {},
   segmentEndpoints: {}
 };
 
@@ -388,6 +397,29 @@ function normalizeGpsPointCatalog(value: unknown): GpsPointCatalog {
       )
       : {};
 
+  const segmentDetails =
+    catalog.segmentDetails &&
+    typeof catalog.segmentDetails === "object" &&
+    !Array.isArray(catalog.segmentDetails)
+      ? Object.entries(catalog.segmentDetails).reduce<RouteSegmentDetails>(
+        (details, [segmentIndex, detail]) => {
+          const index = Number(segmentIndex);
+          if (!Number.isInteger(index) || index < 0 || !detail || typeof detail !== "object") {
+            return details;
+          }
+
+          const saved = detail as Partial<RouteSegmentDetail>;
+          const name = typeof saved.name === "string" ? saved.name.trim() : "";
+          const departureTime = isRouteSegmentDepartureTime(saved.departureTime)
+            ? saved.departureTime
+            : "";
+          if (name || departureTime) details[index] = { name, departureTime };
+          return details;
+        },
+        {}
+      )
+      : {};
+
   const segmentEndpoints =
     catalog.segmentEndpoints &&
     typeof catalog.segmentEndpoints === "object" &&
@@ -426,11 +458,12 @@ function normalizeGpsPointCatalog(value: unknown): GpsPointCatalog {
     pointCoordinates,
     pointOrder,
     segmentColors,
+    segmentDetails,
     segmentEndpoints
   };
 }
 
-function getGpsPointOrder(gpxPoints: GpxWaypoint[], catalog: GpsPointCatalog) {
+function getGpsPointOrder(gpxPoints: GpxWaypoint[], catalog: GpsPointSourceCatalog) {
   const knownIds = Array.from(
     new Set([
       ...gpxPoints.map((point) => point.id),
@@ -446,7 +479,7 @@ function getGpsPointOrder(gpxPoints: GpxWaypoint[], catalog: GpsPointCatalog) {
 
 function resolveGpsPoints(
   gpxPoints: GpxWaypoint[],
-  catalog: GpsPointCatalog
+  catalog: GpsPointSourceCatalog
 ): ResolvedGpsPoint[] {
   const points = [
     ...gpxPoints.map((point) => ({
@@ -795,9 +828,23 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     [gpsPointConfigs]
   );
 
+  const gpsPointSourceCatalog = useMemo<GpsPointSourceCatalog>(
+    () => ({
+      manualPoints: gpsPointCatalog.manualPoints,
+      pointCoordinates: gpsPointCatalog.pointCoordinates,
+      pointNames: gpsPointCatalog.pointNames,
+      pointOrder: gpsPointCatalog.pointOrder
+    }),
+    [
+      gpsPointCatalog.manualPoints,
+      gpsPointCatalog.pointCoordinates,
+      gpsPointCatalog.pointNames,
+      gpsPointCatalog.pointOrder
+    ]
+  );
   const gpsPoints = useMemo(
-    () => resolveGpsPoints(gpxRoute.waypoints, gpsPointCatalog),
-    [gpxRoute.waypoints, gpsPointCatalog]
+    () => resolveGpsPoints(gpxRoute.waypoints, gpsPointSourceCatalog),
+    [gpxRoute.waypoints, gpsPointSourceCatalog]
   );
 
   const gpsPointSegmentIndexes = useMemo(() => {
@@ -1089,6 +1136,25 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     }));
   }
 
+  function saveGpsSegmentDetails(segmentIndex: number, details: RouteSegmentDetail) {
+    if (!Number.isInteger(segmentIndex) || segmentIndex < 0) return;
+
+    const name = details.name?.trim() ?? "";
+    const departureTime = isRouteSegmentDepartureTime(details.departureTime)
+      ? details.departureTime
+      : "";
+
+    setGpsPointCatalog((current) => {
+      const segmentDetails = { ...current.segmentDetails };
+      if (name || departureTime) {
+        segmentDetails[segmentIndex] = { name, departureTime };
+      } else {
+        delete segmentDetails[segmentIndex];
+      }
+      return { ...current, segmentDetails };
+    });
+  }
+
   function saveGpsSegmentEndpoint(
     segmentIndex: number,
     side: SegmentEndpointSide,
@@ -1330,6 +1396,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           pointStepCounts={gpsPointStepCounts}
           pointSegmentIndexes={gpsPointSegmentIndexes}
           segmentColors={gpsPointCatalog.segmentColors}
+          segmentDetails={gpsPointCatalog.segmentDetails}
           segmentEndpoints={gpsPointCatalog.segmentEndpoints}
           manualRoutes={manualRoutesForMap}
           initialWaypointId={gpsFocusPointId}
@@ -1337,6 +1404,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           onEditPoint={openGpsPointEditorById}
           onSavePointPositions={saveGpsPointPositions}
           onChangeSegmentColor={saveGpsSegmentColor}
+          onSaveSegmentDetails={saveGpsSegmentDetails}
           onAssignSegmentEndpoint={saveGpsSegmentEndpoint}
           onCreateSegmentEndpoint={addGpsSegmentEndpointFromMap}
           onCreateManualRoute={createManualRouteFromMap}
@@ -1545,11 +1613,11 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                     const segmentLabel =
                       segmentIndex === undefined
                         ? ""
-                        : routeSegmentDisplayLabel(
-                          segmentIndex,
-                          gpsPointCatalog.segmentEndpoints,
-                          gpsPoints
-                        );
+                        : routeSegmentDisplayLabel(segmentIndex, gpsPointCatalog.segmentDetails);
+                    const segmentDepartureTime =
+                      segmentIndex === undefined
+                        ? ""
+                        : gpsPointCatalog.segmentDetails[segmentIndex]?.departureTime ?? "";
                     const isDraggingPoint = gpsPointDrag?.activeId === point.id;
                     const isDropTarget = Boolean(
                       gpsPointDrag &&
@@ -1580,7 +1648,9 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                           <div>
                             <strong>{point.name}</strong>
                             <small>
-                              {segmentLabel ? `${segmentLabel} · ` : ""}
+                              {segmentLabel
+                                ? `${segmentLabel}${segmentDepartureTime ? ` · Saída ${segmentDepartureTime}` : ""} · `
+                                : ""}
                               {gpsPointScheduleLabel(config, waypointTimeLabel(point.time, point.description))}
                             </small>
                           </div>

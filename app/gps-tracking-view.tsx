@@ -26,6 +26,8 @@ import {
 } from "../lib/route-segment-utils";
 import type {
   RouteSegmentColors,
+  RouteSegmentDetail,
+  RouteSegmentDetails,
   RouteSegmentEndpoints,
   SegmentEndpointSide
 } from "../lib/route-segment-utils";
@@ -89,11 +91,63 @@ function tooltipText(content: string) {
   return element;
 }
 
+function departureCopy(departureTime: string | undefined) {
+  return departureTime ? ` · Saída às ${departureTime}` : "";
+}
+
+function SegmentDetailsForm({
+  segmentIndex,
+  detail,
+  disabled,
+  onSave
+}: {
+  segmentIndex: number;
+  detail: RouteSegmentDetail | undefined;
+  disabled: boolean;
+  onSave: (detail: RouteSegmentDetail) => void;
+}) {
+  const [name, setName] = useState(() => detail?.name ?? "");
+  const [departureTime, setDepartureTime] = useState(() => detail?.departureTime ?? "");
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSave({ name, departureTime });
+  }
+
+  return (
+    <form className="gps-segment-details" onSubmit={submit}>
+      <label className="gps-segment-detail-name">
+        <span>Nome do trecho</span>
+        <input
+          type="text"
+          value={name}
+          placeholder={`Trecho ${segmentIndex + 1}`}
+          disabled={disabled}
+          onChange={(event) => setName(event.target.value)}
+        />
+      </label>
+      <label className="gps-segment-detail-time">
+        <span>Horário de saída</span>
+        <input
+          type="time"
+          value={departureTime}
+          disabled={disabled}
+          onChange={(event) => setDepartureTime(event.target.value)}
+        />
+      </label>
+      <button className="gps-save-segment-details-button" type="submit" disabled={disabled}>
+        <Save size={12} /> Salvar trecho
+      </button>
+    </form>
+  );
+}
+
 export function GpsTrackingView({
   route,
   pointStepCounts,
   pointSegmentIndexes,
   segmentColors,
+  segmentDetails,
   segmentEndpoints,
   manualRoutes,
   initialWaypointId,
@@ -101,6 +155,7 @@ export function GpsTrackingView({
   onEditPoint,
   onSavePointPositions,
   onChangeSegmentColor,
+  onSaveSegmentDetails,
   onAssignSegmentEndpoint,
   onCreateSegmentEndpoint,
   onCreateManualRoute,
@@ -110,6 +165,7 @@ export function GpsTrackingView({
   pointStepCounts: Record<string, number>;
   pointSegmentIndexes: Record<string, number>;
   segmentColors: RouteSegmentColors;
+  segmentDetails: RouteSegmentDetails;
   segmentEndpoints: RouteSegmentEndpoints;
   manualRoutes: ManualMapRoute[];
   initialWaypointId: string | null;
@@ -117,6 +173,7 @@ export function GpsTrackingView({
   onEditPoint: (pointId: string) => void;
   onSavePointPositions: (positions: Record<string, GpxCoordinate>) => void;
   onChangeSegmentColor: (segmentIndex: number, color: string) => void;
+  onSaveSegmentDetails: (segmentIndex: number, detail: RouteSegmentDetail) => void;
   onAssignSegmentEndpoint: (
     segmentIndex: number,
     side: SegmentEndpointSide,
@@ -196,10 +253,10 @@ export function GpsTrackingView({
     () => Object.fromEntries(
       visibleRouteSegments.map((segment) => [
         segment.index,
-        routeSegmentDisplayLabel(segment.index, segmentEndpoints, route.waypoints)
+        routeSegmentDisplayLabel(segment.index, segmentDetails)
       ])
     ) as Record<number, string>,
-    [route.waypoints, segmentEndpoints, visibleRouteSegments]
+    [segmentDetails, visibleRouteSegments]
   );
   const manualRoutePointCount = useMemo(
     () => manualRoutes.reduce((total, manualRoute) => total + manualRoute.points.length, 0),
@@ -533,6 +590,7 @@ export function GpsTrackingView({
         );
         const color = routeSegmentColor(segment.index, segmentColors);
         const segmentLabel = segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index);
+        const segmentDepartureTime = segmentDetails[segment.index]?.departureTime;
         allCoordinates.push(...coordinates);
         gpxCoordinates.push(...coordinates);
         const routeLine = leaflet
@@ -543,7 +601,7 @@ export function GpsTrackingView({
             lineCap: "round",
             lineJoin: "round"
           })
-          .bindTooltip(tooltipText(segmentLabel))
+          .bindTooltip(tooltipText(`${segmentLabel}${departureCopy(segmentDepartureTime)}`))
           .addTo(activeMap);
         routeLinesRef.current[segment.index] = routeLine;
 
@@ -632,6 +690,12 @@ export function GpsTrackingView({
 
       const firstSegment = visibleRouteSegments.at(0);
       const lastSegment = visibleRouteSegments.at(-1);
+      const firstSegmentIndex = firstSegment?.index ?? 0;
+      const lastSegmentIndex = lastSegment?.index ?? 0;
+      const firstSegmentLabel =
+        segmentDisplayLabels[firstSegmentIndex] ?? routeSegmentLabel(firstSegmentIndex);
+      const lastSegmentLabel =
+        segmentDisplayLabels[lastSegmentIndex] ?? routeSegmentLabel(lastSegmentIndex);
       const firstPoint = gpxCoordinates.at(0);
       const lastPoint = gpxCoordinates.at(-1);
       if (firstPoint) {
@@ -647,7 +711,7 @@ export function GpsTrackingView({
           })
           .bindTooltip(
             tooltipText(
-              `Início do arquivo GPX · ${segmentDisplayLabels[firstSegment?.index ?? 0] ?? routeSegmentLabel(firstSegment?.index ?? 0)}`
+              `Início do arquivo GPX · ${firstSegmentLabel}${departureCopy(segmentDetails[firstSegmentIndex]?.departureTime)}`
             )
           )
           .addTo(activeMap);
@@ -665,7 +729,7 @@ export function GpsTrackingView({
           })
           .bindTooltip(
             tooltipText(
-              `Fim do arquivo GPX · ${segmentDisplayLabels[lastSegment?.index ?? 0] ?? routeSegmentLabel(lastSegment?.index ?? 0)}`
+              `Fim do arquivo GPX · ${lastSegmentLabel}${departureCopy(segmentDetails[lastSegmentIndex]?.departureTime)}`
             )
           )
           .addTo(activeMap);
@@ -681,7 +745,7 @@ export function GpsTrackingView({
         const segmentLabel =
           segmentIndex === undefined
             ? ""
-            : ` · ${segmentDisplayLabels[segmentIndex] ?? routeSegmentLabel(segmentIndex)}`;
+            : ` · ${segmentDisplayLabels[segmentIndex] ?? routeSegmentLabel(segmentIndex)}${departureCopy(segmentDetails[segmentIndex]?.departureTime)}`;
         const editedPosition = pointPositionEditsRef.current[point.id];
         const markerPosition = editedPosition ?? point;
         const waypointMarker = leaflet
@@ -787,6 +851,7 @@ export function GpsTrackingView({
     pointStepCounts,
     route,
     segmentColors,
+    segmentDetails,
     segmentEndpoints,
     segmentDisplayLabels,
     focusRouteSegment,
@@ -921,6 +986,7 @@ export function GpsTrackingView({
 
         const endpointName = side === "start" ? "Início" : "Fim";
         const segmentLabel = segmentDisplayLabels[segment.index] ?? routeSegmentLabel(segment.index);
+        const segmentDepartureTime = segmentDetails[segment.index]?.departureTime;
         const label = endpointName;
         const marker = leaflet
           .marker([point.latitude, point.longitude], {
@@ -933,7 +999,7 @@ export function GpsTrackingView({
             zIndexOffset: isSelected ? 700 : 500
           })
           .bindTooltip(
-            tooltipText(`${endpointName} ${isSelected ? "da rota em primeiro plano" : "definido"} · ${segmentLabel}${assignedPoint ? ` · ${assignedPoint.name}` : ""}`)
+            tooltipText(`${endpointName} ${isSelected ? "da rota em primeiro plano" : "definido"} · ${segmentLabel}${departureCopy(segmentDepartureTime)}${assignedPoint ? ` · ${assignedPoint.name}` : ""}`)
           )
           .addTo(map);
         routeEndpointMarkersRef.current.push(marker);
@@ -944,7 +1010,7 @@ export function GpsTrackingView({
       routeEndpointMarkersRef.current.forEach((marker) => marker.remove());
       routeEndpointMarkersRef.current = [];
     };
-  }, [mapReady, route.waypoints, segmentColors, segmentEndpoints, segmentDisplayLabels, selectedRouteSegmentIndex, visibleRouteSegments]);
+  }, [mapReady, route.waypoints, segmentColors, segmentDetails, segmentEndpoints, segmentDisplayLabels, selectedRouteSegmentIndex, visibleRouteSegments]);
 
   useEffect(() => stopTracking, [stopTracking]);
 
@@ -1031,7 +1097,7 @@ export function GpsTrackingView({
             )}
             {selectedRouteSegmentIndex !== null && !endpointMapSelection && (
               <span className="gps-route-focus-hint" role="status">
-                {segmentDisplayLabels[selectedRouteSegmentIndex] ?? routeSegmentLabel(selectedRouteSegmentIndex)} em primeiro plano — início e fim visíveis.
+                {segmentDisplayLabels[selectedRouteSegmentIndex] ?? routeSegmentLabel(selectedRouteSegmentIndex)}{departureCopy(segmentDetails[selectedRouteSegmentIndex]?.departureTime)} em primeiro plano — início e fim visíveis.
               </span>
             )}
             <div className="gps-map-edit-controls">
@@ -1189,8 +1255,8 @@ export function GpsTrackingView({
                 <span>{visibleRouteSegments.length} trechos</span>
               </div>
               <p>
-                Defina a cor e escolha os pontos de início/fim. Se não existir um ponto,
-                marque-o diretamente na linha da rota.
+                Defina o nome e a saída planejada do trecho, depois escolha os pontos de início/fim.
+                Se não existir um ponto, marque-o diretamente na linha da rota.
               </p>
               <ol>
                 {visibleRouteSegments.map((segment) => {
@@ -1220,6 +1286,13 @@ export function GpsTrackingView({
                         <span>
                           Gravação: {formatRecordingTime(segment.timing.startTime)} → {formatRecordingTime(segment.timing.endTime)}
                         </span>
+                        <SegmentDetailsForm
+                          key={`${segment.index}:${segmentDetails[segment.index]?.name ?? ""}:${segmentDetails[segment.index]?.departureTime ?? ""}`}
+                          segmentIndex={segment.index}
+                          detail={segmentDetails[segment.index]}
+                          disabled={isEditingPoints}
+                          onSave={(detail) => onSaveSegmentDetails(segment.index, detail)}
+                        />
                         <div className="gps-segment-endpoint-controls">
                           <label className="gps-segment-endpoint-field">
                             <span>Início</span>

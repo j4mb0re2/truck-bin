@@ -2744,6 +2744,79 @@ button {
   font-weight: 650;
 }
 
+.gps-segment-details {
+  margin-top: 9px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 6px;
+}
+
+.gps-segment-detail-name {
+  grid-column: 1 / -1;
+}
+
+.gps-segment-detail-name,
+.gps-segment-detail-time {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.gps-segment-details label > span {
+  margin: 0 !important;
+  color: #66777c !important;
+  font-size: 8px !important;
+  font-weight: 750 !important;
+}
+
+.gps-segment-details input {
+  width: 100%;
+  min-width: 0;
+  height: 27px;
+  padding: 0 7px;
+  color: #506368;
+  background: #fff;
+  border: 1px solid #d8e4e7;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 8px;
+  font-weight: 650;
+}
+
+.gps-segment-details input:disabled {
+  color: #9aa8aa;
+  background: #f2f5f5;
+}
+
+.gps-save-segment-details-button {
+  min-height: 27px;
+  padding: 5px 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: #fff;
+  background: #2c6d9e;
+  border: 1px solid #2c6d9e;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 8px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.gps-save-segment-details-button:hover:not(:disabled) {
+  background: #245d86;
+  border-color: #245d86;
+}
+
+.gps-save-segment-details-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .gps-segment-color-control {
   width: 28px;
   height: 28px;
