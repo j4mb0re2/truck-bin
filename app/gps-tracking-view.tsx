@@ -288,10 +288,10 @@ export function SegmentDetailsForm({
           </label>
         </section>
       </div>
-      <div className="gps-segment-procedure-bar">
+      <div className="gps-segment-procedure-bar" style={{ marginTop: "10px", display: "flex", flexDirection: "column", gap: "6px" }}>
         {detail?.procedure && (
           <div className="gps-procedure-badge" style={{ flexDirection: "column", alignItems: "flex-start", gap: "4px", width: "100%" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", width: "100%" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", width: "100%", flexWrap: "wrap" }}>
               <span className="proc-icon">{PROCEDURE_CONFIG[detail.procedure.procedureType].icon}</span>
               <strong>{PROCEDURE_CONFIG[detail.procedure.procedureType].label}</strong>
               <small>({detail.procedure.endpointSide === "start" ? "Início" : "Fim"})</small>
@@ -300,31 +300,33 @@ export function SegmentDetailsForm({
                   ⏰ {detail.procedure.startTime || "--:--"} → {detail.procedure.endTime || "--:--"}
                 </span>
               )}
-              {onOpenProcedurePopup && (
-                <button
-                  type="button"
-                  style={{ marginLeft: "auto", fontSize: "11px", padding: "2px 8px", borderRadius: "4px", border: "1px solid #0284c7", background: "#e0f2fe", color: "#0284c7", cursor: "pointer", fontWeight: 700 }}
-                  onClick={() => onOpenProcedurePopup(detail.name || `Trecho ${segmentIndex + 1}`, detail.procedure!)}
-                >
-                  🔔 Ver Instruções
-                </button>
-              )}
             </div>
             {detail.procedure.notes && (
               <p className="proc-notes-text">📝 {detail.procedure.notes}</p>
             )}
           </div>
         )}
-        <div style={{ display: "flex", gap: "6px" }}>
+        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
           <button
             type="button"
             className="gps-open-procedure-button"
             disabled={disabled}
             onClick={onOpenProcedureModal}
+            style={{ flex: 1, minWidth: "120px" }}
           >
             <ClipboardList size={12} /> {detail?.procedure ? "Alterar procedimento" : "Adicionar procedimento"}
           </button>
-          <button className="gps-save-segment-details-button" type="submit" disabled={disabled} style={{ flex: 1 }}>
+          {detail?.procedure && onOpenProcedurePopup && (
+            <button
+              type="button"
+              className="gps-open-procedure-button"
+              style={{ background: "#e0f2fe", color: "#0369a1", borderColor: "#bae6fd" }}
+              onClick={() => onOpenProcedurePopup(detail.name || `Trecho ${segmentIndex + 1}`, detail.procedure!)}
+            >
+              <Eye size={12} /> Visualizar mensagem
+            </button>
+          )}
+          <button className="gps-save-segment-details-button" type="submit" disabled={disabled} style={{ flex: 1, minWidth: "100px" }}>
             <Save size={12} /> Salvar trecho
           </button>
         </div>
@@ -463,10 +465,10 @@ export function ManualRouteDetailsForm({
           </label>
         </section>
       </div>
-      <div className="gps-segment-procedure-bar">
+      <div className="gps-segment-procedure-bar" style={{ marginTop: "10px", display: "flex", flexDirection: "column", gap: "6px" }}>
         {setup?.procedure && (
           <div className="gps-procedure-badge" style={{ flexDirection: "column", alignItems: "flex-start", gap: "4px", width: "100%" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", width: "100%" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", width: "100%", flexWrap: "wrap" }}>
               <span className="proc-icon">{PROCEDURE_CONFIG[setup.procedure.procedureType].icon}</span>
               <strong>{PROCEDURE_CONFIG[setup.procedure.procedureType].label}</strong>
               <small>({setup.procedure.endpointSide === "start" ? "Início" : "Fim"})</small>
@@ -475,31 +477,33 @@ export function ManualRouteDetailsForm({
                   ⏰ {setup.procedure.startTime || "--:--"} → {setup.procedure.endTime || "--:--"}
                 </span>
               )}
-              {onOpenProcedurePopup && (
-                <button
-                  type="button"
-                  style={{ marginLeft: "auto", fontSize: "11px", padding: "2px 8px", borderRadius: "4px", border: "1px solid #0284c7", background: "#e0f2fe", color: "#0284c7", cursor: "pointer", fontWeight: 700 }}
-                  onClick={() => onOpenProcedurePopup(routeName, setup.procedure!)}
-                >
-                  🔔 Ver Instruções
-                </button>
-              )}
             </div>
             {setup.procedure.notes && (
               <p className="proc-notes-text">📝 {setup.procedure.notes}</p>
             )}
           </div>
         )}
-        <div style={{ display: "flex", gap: "6px" }}>
+        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
           <button
             type="button"
             className="gps-open-procedure-button"
             disabled={disabled}
             onClick={onOpenProcedureModal}
+            style={{ flex: 1, minWidth: "120px" }}
           >
             <ClipboardList size={12} /> {setup?.procedure ? "Alterar procedimento" : "Adicionar procedimento"}
           </button>
-          <button className="gps-save-segment-details-button" type="submit" disabled={disabled} style={{ flex: 1 }}>
+          {setup?.procedure && onOpenProcedurePopup && (
+            <button
+              type="button"
+              className="gps-open-procedure-button"
+              style={{ background: "#e0f2fe", color: "#0369a1", borderColor: "#bae6fd" }}
+              onClick={() => onOpenProcedurePopup(routeName, setup.procedure!)}
+            >
+              <Eye size={12} /> Visualizar mensagem
+            </button>
+          )}
+          <button className="gps-save-segment-details-button" type="submit" disabled={disabled} style={{ flex: 1, minWidth: "100px" }}>
             <Save size={12} /> Salvar pontos e horários
           </button>
         </div>
