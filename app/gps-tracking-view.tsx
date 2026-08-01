@@ -1659,6 +1659,15 @@ export function GpsTrackingView({
     }
   }, [hiddenManualRouteIdSet, mapReady, selectedManualRouteId, selectedRouteSegmentIndex]);
 
+  useEffect(() => {
+    if (mapRef.current && mapReady) {
+      const timer = window.setTimeout(() => {
+        mapRef.current?.invalidateSize();
+      }, 120);
+      return () => window.clearTimeout(timer);
+    }
+  }, [mapReady, navigationMode]);
+
   useEffect(() => stopTracking, [stopTracking]);
 
   if (navigationMode) {
@@ -1729,6 +1738,16 @@ export function GpsTrackingView({
             />
           </div>
         </section>
+
+        <div className="gps-navigation-bottom-bar">
+          <button
+            className="hud-exit-large-button"
+            type="button"
+            onClick={onExitNavigation || onBack}
+          >
+            <X size={18} /> Encerrar Navegação
+          </button>
+        </div>
       </main>
     );
   }

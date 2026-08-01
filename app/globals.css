@@ -3900,10 +3900,16 @@ button {
 /* Fullscreen Traditional GPS Navigation View */
 .gps-page.is-navigation-fullscreen {
   position: fixed;
-  inset: 0;
-  z-index: 99999;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 999999;
   width: 100vw;
+  width: 100%;
   height: 100vh;
+  height: 100dvh;
+  height: 100%;
   margin: 0;
   padding: 0;
   background: #0f172a;
@@ -3913,9 +3919,10 @@ button {
 }
 
 .gps-page.is-navigation-fullscreen .gps-layout {
-  display: block;
-  width: 100vw;
-  height: 100vh;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   margin: 0;
   padding: 0;
 }
@@ -3923,17 +3930,19 @@ button {
 .gps-page.is-navigation-fullscreen .gps-map-panel {
   position: absolute;
   inset: 0;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   border-radius: 0;
   border: none;
   box-shadow: none;
+  margin: 0;
+  padding: 0;
 }
 
 .gps-page.is-navigation-fullscreen .gps-map {
-  width: 100vw;
-  height: 100vh;
-  min-height: 100vh;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
   border-radius: 0;
 }
 
@@ -4076,4 +4085,42 @@ button {
     padding: 0 10px;
     font-size: 11px;
   }
+}
+
+.gps-navigation-bottom-bar {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: auto;
+  width: calc(100% - 28px);
+  max-width: 420px;
+}
+
+.hud-exit-large-button {
+  width: 100%;
+  height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 14px;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 10px 30px rgba(239, 68, 68, 0.4);
+  transition: all 0.2s ease;
+}
+
+.hud-exit-large-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 35px rgba(239, 68, 68, 0.5);
+  background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
 }
