@@ -2092,6 +2092,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                 onOpenGpsSegment={() => {
                   setViewMode("gps");
                 }}
+                onOpenGpsPoint={(pointId) => openGps(pointId)}
                 onStartNavigation={() => startNavigationMode(selectedRoute.id)}
                 onAddFuel={() => addFuelStop(selectedRoute)}
                 onDelete={() => deleteRoute(selectedRoute)}
@@ -2163,6 +2164,7 @@ function RouteDetail({
   onEdit,
   onOpenGps,
   onOpenGpsSegment,
+  onOpenGpsPoint,
   onStartNavigation,
   onAddFuel,
   onDelete
@@ -2176,6 +2178,7 @@ function RouteDetail({
   onEdit: () => void;
   onOpenGps: () => void;
   onOpenGpsSegment: (segmentIndex: number) => void;
+  onOpenGpsPoint?: (pointId: string) => void;
   onStartNavigation: () => void;
   onAddFuel: () => void;
   onDelete: () => void;
@@ -2348,6 +2351,43 @@ function RouteDetail({
               </button>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* Pontos Marcados no Mapa (GPS Waypoints) */}
+      <div className="route-segments-section">
+        <div className="journey-header">
+          <h3>Pontos do Mapa (GPS)</h3>
+          <span>Pontos numerados e paradas da operação</span>
+        </div>
+
+        <div className="route-segments-list">
+          {gpsPoints.length > 0 ? (
+            gpsPoints.map((point, index) => (
+              <div key={point.id} className="route-segment-item gps-point-item">
+                <div className="gps-point-badge-number">
+                  #{index + 1}
+                </div>
+                <div className="segment-info">
+                  <strong>{point.name}</strong>
+                  <small>
+                    Lat: {point.latitude.toFixed(4)}, Lng: {point.longitude.toFixed(4)}
+                    {point.time ? ` · ${point.time}` : ""}
+                  </small>
+                </div>
+                <button
+                  type="button"
+                  className="segment-open-button"
+                  onClick={() => onOpenGpsPoint?.(point.id)}
+                  title="Ver este ponto no mapa GPS"
+                >
+                  <MapPin size={13} /> Ir ao ponto
+                </button>
+              </div>
+            ))
+          ) : (
+            <p className="no-segments-note">Nenhum ponto registrado no mapa.</p>
+          )}
         </div>
       </div>
 

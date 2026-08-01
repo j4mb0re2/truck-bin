@@ -4211,3 +4211,17 @@ button {
   font-style: italic;
   margin: 4px 0;
 }
+
+.gps-point-badge-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: #0284c7;
+  color: #ffffff;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
