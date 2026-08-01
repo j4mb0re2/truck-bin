@@ -31,7 +31,6 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GpsTrackingView } from "./gps-tracking-view";
-import type { ManualMapRoute } from "./gps-tracking-view";
 import type { GpxCoordinate, GpxRouteData, GpxWaypoint } from "../lib/gpx-route";
 import {
   PROCEDURE_CONFIG,
@@ -2181,9 +2180,6 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                           {firstStage?.stageNumber && (
                             <em>Stage {firstStage.stageNumber}</em>
                           )}
-                          {item.kind === "manual-route" && (
-                            <em>Traçado manual</em>
-                          )}
                           {item.procedure && (
                             <em style={{ color: "#0369a1", backgroundColor: "#e0f2fe", fontStyle: "normal", fontWeight: 700 }}>
                               {PROCEDURE_CONFIG[item.procedure.procedureType].icon} {PROCEDURE_CONFIG[item.procedure.procedureType].label} ({item.procedure.endpointSide === "start" ? "Início" : "Fim"})
@@ -2227,13 +2223,8 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                 gpxRoute={gpxRoute}
                 gpsPointCatalog={gpsPointCatalog}
                 gpsPoints={gpsPoints}
-                manualRoutes={manualRoutesForMap}
                 nowMinutes={nowMinutes}
                 onEdit={() => selectedRoute && openEditRoute(selectedRoute)}
-                onOpenGps={() => {
-                  setViewMode("gps");
-                  setGpsFocusPointId(null);
-                }}
                 onOpenGpsSegment={() => {
                   setViewMode("gps");
                 }}
@@ -2305,10 +2296,8 @@ function RouteDetail({
   gpxRoute,
   gpsPointCatalog,
   gpsPoints,
-  manualRoutes,
   nowMinutes,
   onEdit,
-  onOpenGps,
   onOpenGpsSegment,
   onOpenGpsPoint,
   onStartNavigation,
@@ -2320,12 +2309,10 @@ function RouteDetail({
   gpxRoute: GpxRouteData;
   gpsPointCatalog: GpsPointCatalog;
   gpsPoints: ResolvedGpsPoint[];
-  manualRoutes: ManualMapRoute[];
   nowMinutes: number;
   onEdit: () => void;
-  onOpenGps: () => void;
   onOpenGpsSegment: (segmentIndex: number) => void;
-  onOpenGpsPoint?: (pointId: string) => void;
+  onOpenGpsPoint: (pointId: string) => void;
   onStartNavigation: () => void;
   onAddFuel: () => void;
   onDelete: () => void;
@@ -2416,51 +2403,7 @@ function RouteDetail({
     );
   }
 
-  if (isValidManualPath(route.manualPath)) {
-    const setup = route.manualSetup;
 
-    return (
-      <div className="detail-content manual-route-detail">
-        <div className="detail-heading">
-          <div>
-            <span className="eyebrow">TRAÇADO MANUAL</span>
-            <h2>{route.name}</h2>
-            <p className="manual-route-detail-note">
-              <RouteIcon size={14} /> {route.manualPath.length} pontos desenhados no mapa GPS
-            </p>
-          </div>
-          <div className="icon-actions">
-            <button className="danger" type="button" aria-label="Excluir rota" onClick={onDelete}>
-              <Trash2 size={17} />
-            </button>
-          </div>
-        </div>
-
-        <div className="detail-metrics route-metrics-two">
-          <div>
-            <span><Clock3 size={15} /> Horário de início</span>
-            <strong>{setup?.departureTime || "Não definido"}</strong>
-          </div>
-          <div>
-            <span><Clock3 size={15} /> Horário de fim</span>
-            <strong>{setup?.arrivalTime || "Não definido"}</strong>
-          </div>
-        </div>
-
-        <div className="manual-route-detail-action">
-          <p>Inicie o acompanhamento por GPS ao vivo ou configure horários.</p>
-          <div style={{ display: "flex", gap: "8px", width: "100%" }}>
-            <button className="primary-button navigation-mode-button" style={{ flex: 1 }} type="button" onClick={onStartNavigation}>
-              <Navigation size={17} /> Navegar
-            </button>
-            <button className="secondary-button" style={{ flex: 1 }} type="button" onClick={onOpenGps}>
-              <Satellite size={17} /> Abrir GPS
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   const status = getStatus(route, nowMinutes);
   const progress = getProgress(route, nowMinutes);
@@ -2552,28 +2495,6 @@ function RouteDetail({
           ) : (
             <p className="no-segments-note">Nenhum trecho GPX carregado no mapa.</p>
           )}
-
-          {manualRoutes.map((manual) => (
-            <div key={manual.id} className="route-segment-item manual-item">
-              <div className="segment-color-bar" style={{ backgroundColor: manual.color || "#0f766e" }} />
-              <div className="segment-info">
-                <strong>{manual.name} (Traçado manual)</strong>
-                <small>
-                  {manual.points.length} pontos no mapa
-                  {manual.setup?.departureTime ? ` · Saída ${manual.setup.departureTime}` : ""}
-                  {manual.setup?.arrivalTime ? ` · Chegada ${manual.setup.arrivalTime}` : ""}
-                </small>
-              </div>
-              <button
-                type="button"
-                className="segment-open-button"
-                onClick={onOpenGps}
-                title="Ver esta rota no mapa GPS"
-              >
-                <MapPin size={13} /> Ver no mapa
-              </button>
-            </div>
-          ))}
         </div>
       </div>
 
