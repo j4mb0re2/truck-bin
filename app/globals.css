@@ -3919,12 +3919,13 @@ button {
 }
 
 .gps-page.is-navigation-fullscreen .gps-layout {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  flex: 1;
   width: 100%;
   height: 100%;
   margin: 0;
   padding: 0;
+  overflow: hidden;
 }
 
 .gps-page.is-navigation-fullscreen .gps-map-panel {
@@ -3946,32 +3947,28 @@ button {
   border-radius: 0;
 }
 
-/* Floating Navigation HUD Overlay */
+/* Dedicated Top Navigation Header Bar */
 .gps-navigation-hud {
-  position: absolute;
-  top: 14px;
-  left: 14px;
-  right: 14px;
+  position: relative;
+  width: 100%;
+  flex-shrink: 0;
   z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  pointer-events: none;
+  padding: 10px 16px;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 
 .hud-card-main {
-  pointer-events: auto;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 16px;
-  background: rgba(15, 23, 42, 0.9);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 14px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
   color: #ffffff;
 }
 
@@ -4069,20 +4066,14 @@ button {
 
 @media (max-width: 640px) {
   .gps-navigation-hud {
-    top: 10px;
-    left: 10px;
-    right: 10px;
-    flex-direction: column;
-    align-items: stretch;
+    padding: 8px 12px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
   }
 
   .hud-card-main {
-    justify-content: space-between;
-    padding: 8px 12px;
-  }
-
-  .hud-controls-group {
-    justify-content: flex-end;
+    padding: 0;
   }
 
   .hud-button {
