@@ -4,6 +4,8 @@ import {
   ArrowLeft,
   ArrowRight,
   Bell,
+  Check,
+  ChevronDown,
   ClipboardList,
   Clock,
   Crosshair,
@@ -641,6 +643,13 @@ export function GpsTrackingView({
   >(null);
   const [activeProcedurePopup, setActiveProcedurePopup] = useState<ActiveProcedurePopup | null>(null);
   const [dismissedProcedureKeys, setDismissedProcedureKeys] = useState<string[]>([]);
+  const [isRouteSelectorOpen, setIsRouteSelectorOpen] = useState(false);
+  const [activeNavKey, setActiveNavKey] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("truck-bin:active-navigation-key");
+    }
+    return null;
+  });
 
   function handleSaveProcedure(procedure: RouteSegmentProcedure | null) {
     if (!procedureModalTarget) return;
@@ -789,6 +798,58 @@ export function GpsTrackingView({
     return items;
   }, [visibleRouteSegments, segmentDetails, segmentDisplayLabels, manualRoutes]);
 
+  const switchActiveNavigationRoute = useCallback(
+    (targetKey: string) => {
+      setActiveNavKey(targetKey);
+      try {
+        localStorage.setItem("truck-bin:active-navigation-key", targetKey);
+      } catch {}
+
+      const targetItem = sortedAllGpsItems.find((item) => {
+        const key = item.kind === "segment" ? `segment-${item.segment.index}` : `manual-${item.manualRoute.id}`;
+        return key === targetKey;
+      });
+
+      if (!targetItem) return;
+
+      const allSegmentIndexes = sortedAllGpsItems.filter((i) => i.kind === "segment").map((i) => i.segment.index);
+      const allManualRouteIds = sortedAllGpsItems.filter((i) => i.kind === "manual-route").map((i) => i.manualRoute.id);
+
+      if (targetItem.kind === "segment") {
+        setHiddenRouteSegmentIndexes(allSegmentIndexes.filter((idx) => idx !== targetItem.segment.index));
+        setHiddenManualRouteIds(allManualRouteIds);
+        setSelectedRouteSegmentIndex(targetItem.segment.index);
+        setSelectedManualRouteId(null);
+      } else {
+        setHiddenManualRouteIds(allManualRouteIds.filter((id) => id !== targetItem.manualRoute.id));
+        setHiddenRouteSegmentIndexes(allSegmentIndexes);
+        setSelectedManualRouteId(targetItem.manualRoute.id);
+        setSelectedRouteSegmentIndex(null);
+      }
+
+      setIsRouteSelectorOpen(false);
+
+      const leaflet = leafletRef.current;
+      const map = mapRef.current;
+      if (leaflet && map) {
+        if (targetItem.kind === "segment" && targetItem.segment.points.length > 0) {
+          const latLngs = targetItem.segment.points.map((p) => [p.latitude, p.longitude] as [number, number]);
+          const bounds = leaflet.latLngBounds(latLngs);
+          if (bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+          }
+        } else if (targetItem.kind === "manual-route" && targetItem.manualRoute.points.length > 0) {
+          const latLngs = targetItem.manualRoute.points.map((p) => [p.latitude, p.longitude] as [number, number]);
+          const bounds = leaflet.latLngBounds(latLngs);
+          if (bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+          }
+        }
+      }
+    },
+    [sortedAllGpsItems]
+  );
+
   // Efeito para iniciar automaticamente na Rota 1 no início do dia ou retomar a rota ativa ao reabrir o app
   useEffect(() => {
     if (!navigationMode || !sortedAllGpsItems.length) return;
@@ -805,6 +866,7 @@ export function GpsTrackingView({
     }
 
     const targetKey = targetItem.kind === "segment" ? `segment-${targetItem.segment.index}` : `manual-${targetItem.manualRoute.id}`;
+    setActiveNavKey(targetKey);
     try {
       localStorage.setItem("truck-bin:active-navigation-key", targetKey);
     } catch {}
@@ -829,20 +891,160 @@ export function GpsTrackingView({
     return () => clearTimeout(timer);
   }, [navigationMode, sortedAllGpsItems]);
 
-  const currentActiveNavTitle = useMemo(() => {
-    if (!sortedAllGpsItems.length) return activeRouteName || "Rota 1";
-    const savedKey = typeof window !== "undefined" ? localStorage.getItem("truck-bin:active-navigation-key") : null;
+  const currentActiveNavItem = useMemo(() => {
+    if (!sortedAllGpsItems.length) return null;
     const item =
       sortedAllGpsItems.find((i) => {
         const k = i.kind === "segment" ? `segment-${i.segment.index}` : `manual-${i.manualRoute.id}`;
-        return k === savedKey;
+        return k === activeNavKey;
       }) || sortedAllGpsItems[0];
 
-    if (!item) return activeRouteName || "Rota 1";
-    return item.kind === "segment"
-      ? segmentDisplayLabels[item.segment.index] ?? routeSegmentLabel(item.segment.index)
-      : item.manualRoute.name;
-  }, [sortedAllGpsItems, segmentDisplayLabels, activeRouteName]);
+    return item;
+  }, [sortedAllGpsItems, activeNavKey]);
+
+  const currentActiveNavTitle = useMemo(() => {
+    if (!currentActiveNavItem) return activeRouteName || "Rota 1";
+    return currentActiveNavItem.kind === "segment"
+      ? (segmentDisplayLabels[currentActiveNavItem.segment.index] ?? routeSegmentLabel(currentActiveNavItem.segment.index))
+      : currentActiveNavItem.manualRoute.name;
+  }, [currentActiveNavItem, segmentDisplayLabels, activeRouteName]);
+
+  const activeRouteDestinationAndSchedule = useMemo(() => {
+    if (!currentActiveNavItem) return null;
+
+    let destinationCoord: GpxCoordinate | undefined;
+    let scheduledDepartureTime = "";
+    let scheduledArrivalTime = "";
+    let procedure: RouteSegmentProcedure | undefined;
+
+    const waypointsById = new Map(route.waypoints.map((w) => [w.id, w]));
+
+    if (currentActiveNavItem.kind === "segment") {
+      const index = currentActiveNavItem.segment.index;
+      const detail = segmentDetails[index];
+      const endpoints = segmentEndpoints[index];
+
+      scheduledDepartureTime = detail?.departureTime || currentActiveNavItem.segment.timing.startTime || "";
+      scheduledArrivalTime = detail?.arrivalTime || currentActiveNavItem.segment.timing.endTime || "";
+      procedure = detail?.procedure;
+
+      const endWp = endpoints?.endPointId ? waypointsById.get(endpoints.endPointId) : undefined;
+      if (endWp) {
+        destinationCoord = { latitude: endWp.latitude, longitude: endWp.longitude };
+      } else if (currentActiveNavItem.segment.points.length > 0) {
+        const pt = currentActiveNavItem.segment.points[currentActiveNavItem.segment.points.length - 1];
+        destinationCoord = { latitude: pt.latitude, longitude: pt.longitude };
+      }
+    } else {
+      const setup = currentActiveNavItem.manualRoute.setup;
+      scheduledDepartureTime = setup.departureTime || "";
+      scheduledArrivalTime = setup.arrivalTime || "";
+      procedure = setup.procedure;
+
+      const endWp = setup.endPointId ? waypointsById.get(setup.endPointId) : undefined;
+      if (endWp) {
+        destinationCoord = { latitude: endWp.latitude, longitude: endWp.longitude };
+      } else if (currentActiveNavItem.manualRoute.points.length > 0) {
+        const pt = currentActiveNavItem.manualRoute.points[currentActiveNavItem.manualRoute.points.length - 1];
+        destinationCoord = { latitude: pt.latitude, longitude: pt.longitude };
+      }
+    }
+
+    return {
+      destinationCoord,
+      scheduledDepartureTime,
+      scheduledArrivalTime,
+      procedure
+    };
+  }, [currentActiveNavItem, segmentDetails, segmentEndpoints, route.waypoints]);
+
+  const etaCalculation = useMemo(() => {
+    if (!livePosition || !activeRouteDestinationAndSchedule?.destinationCoord) {
+      return null;
+    }
+
+    const dest = activeRouteDestinationAndSchedule.destinationCoord;
+
+    let remainingMeters = 0;
+    let points: GpxCoordinate[] = [];
+    if (currentActiveNavItem?.kind === "segment") {
+      points = currentActiveNavItem.segment.points;
+    } else if (currentActiveNavItem?.kind === "manual-route") {
+      points = currentActiveNavItem.manualRoute.points;
+    }
+
+    if (points.length >= 2) {
+      let closestIdx = 0;
+      let minSqDist = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < points.length; i++) {
+        const d = (livePosition.latitude - points[i].latitude) ** 2 + (livePosition.longitude - points[i].longitude) ** 2;
+        if (d < minSqDist) {
+          minSqDist = d;
+          closestIdx = i;
+        }
+      }
+
+      remainingMeters += calculateDistanceMeters(
+        livePosition.latitude,
+        livePosition.longitude,
+        points[closestIdx].latitude,
+        points[closestIdx].longitude
+      );
+
+      for (let i = closestIdx; i < points.length - 1; i++) {
+        remainingMeters += calculateDistanceMeters(
+          points[i].latitude,
+          points[i].longitude,
+          points[i + 1].latitude,
+          points[i + 1].longitude
+        );
+      }
+    } else {
+      remainingMeters = calculateDistanceMeters(
+        livePosition.latitude,
+        livePosition.longitude,
+        dest.latitude,
+        dest.longitude
+      );
+    }
+
+    const distanceKm = remainingMeters / 1000;
+    const averageSpeedKmH = 50;
+    const remainingMinutes = Math.max(1, Math.round((distanceKm / averageSpeedKmH) * 60));
+
+    const now = new Date();
+    const etaDate = new Date(now.getTime() + remainingMinutes * 60 * 1000);
+    const etaTimeString = etaDate.toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+
+    let delayStatus: "on-time" | "delayed" | "unknown" = "unknown";
+    let delayMinutes = 0;
+
+    const scheduledStr = activeRouteDestinationAndSchedule.scheduledArrivalTime;
+    if (scheduledStr) {
+      const scheduledMins = parseTimeToMinutes(scheduledStr);
+      const etaMins = etaDate.getHours() * 60 + etaDate.getMinutes();
+
+      if (Number.isFinite(scheduledMins)) {
+        delayMinutes = etaMins - scheduledMins;
+        if (delayMinutes > 2) {
+          delayStatus = "delayed";
+        } else {
+          delayStatus = "on-time";
+        }
+      }
+    }
+
+    return {
+      distanceKm: distanceKm.toFixed(1),
+      remainingMinutes,
+      etaTimeString,
+      delayStatus,
+      delayMinutes
+    };
+  }, [livePosition, activeRouteDestinationAndSchedule, currentActiveNavItem]);
 
   // Checagem de Geofence: Detecta se o caminhão chegou ao local do procedimento
   useEffect(() => {
@@ -2027,12 +2229,142 @@ export function GpsTrackingView({
     return (
       <main className="gps-page is-navigation-fullscreen">
         <div className="gps-navigation-hud">
-          <div className="hud-card-main">
-            <div className={`hud-route-badge ${gpsState === "tracking" ? "is-gps-on" : "is-gps-off"}`}>
-              <Navigation size={18} className={gpsState === "tracking" ? "gps-nav-icon-spin" : ""} />
-            </div>
-            <div className="hud-route-title">
-              <strong>{currentActiveNavTitle}</strong>
+          {/* Seletor de Rota Interativo no Topo */}
+          <div className="hud-route-selector-container">
+            <button
+              type="button"
+              className={`hud-card-main hud-route-selector-trigger ${isRouteSelectorOpen ? "is-active" : ""}`}
+              onClick={() => setIsRouteSelectorOpen((prev) => !prev)}
+              aria-expanded={isRouteSelectorOpen}
+              aria-haspopup="true"
+              title="Clique para alternar a rota/trajeto que deseja seguir"
+            >
+              <div className={`hud-route-badge ${gpsState === "tracking" ? "is-gps-on" : "is-gps-off"}`}>
+                <Navigation size={18} className={gpsState === "tracking" ? "gps-nav-icon-spin" : ""} />
+              </div>
+              <div className="hud-route-title">
+                <span className="hud-route-eyebrow">
+                  TRAJETO ATIVO <small>(Alternar ▾)</small>
+                </span>
+                <strong>
+                  {currentActiveNavTitle}
+                  <ChevronDown size={16} className={`hud-chevron ${isRouteSelectorOpen ? "is-open" : ""}`} />
+                </strong>
+              </div>
+            </button>
+
+            {/* Menu Dropdown de Seleção de Rotas */}
+            {isRouteSelectorOpen && (
+              <div className="hud-route-dropdown-menu">
+                <div className="hud-dropdown-header">
+                  <span>SELECIONE O TRAJETO A SEGUIR</span>
+                  <small>{sortedAllGpsItems.length} {sortedAllGpsItems.length === 1 ? "rota disponível" : "rotas disponíveis"}</small>
+                </div>
+                <div className="hud-dropdown-list">
+                  {sortedAllGpsItems.map((item) => {
+                    const itemKey = item.kind === "segment" ? `segment-${item.segment.index}` : `manual-${item.manualRoute.id}`;
+                    const activeKey = currentActiveNavItem
+                      ? currentActiveNavItem.kind === "segment"
+                        ? `segment-${currentActiveNavItem.segment.index}`
+                        : `manual-${currentActiveNavItem.manualRoute.id}`
+                      : null;
+                    const isSelected = itemKey === activeKey;
+                    const title = item.kind === "segment"
+                      ? (segmentDisplayLabels[item.segment.index] ?? routeSegmentLabel(item.segment.index))
+                      : item.manualRoute.name;
+
+                    const depTime = item.kind === "segment"
+                      ? (segmentDetails[item.segment.index]?.departureTime || item.segment.timing.startTime || "--:--")
+                      : (item.manualRoute.setup?.departureTime || "--:--");
+
+                    const arrTime = item.kind === "segment"
+                      ? (segmentDetails[item.segment.index]?.arrivalTime || item.segment.timing.endTime || "--:--")
+                      : (item.manualRoute.setup?.arrivalTime || "--:--");
+
+                    const proc = item.kind === "segment"
+                      ? segmentDetails[item.segment.index]?.procedure
+                      : item.manualRoute.setup?.procedure;
+
+                    return (
+                      <button
+                        key={itemKey}
+                        type="button"
+                        className={`hud-dropdown-item ${isSelected ? "is-selected" : ""}`}
+                        onClick={() => switchActiveNavigationRoute(itemKey)}
+                      >
+                        <div className="hud-dropdown-item-info">
+                          <div className="hud-dropdown-item-title-row">
+                            <strong>{title}</strong>
+                            {isSelected && <span className="hud-active-badge"><Check size={12} /> Selecionada</span>}
+                          </div>
+                          <div className="hud-dropdown-item-schedule">
+                            <Clock size={12} />
+                            <span>Horários: {depTime} → {arrTime}</span>
+                            {proc && (
+                              <span className="hud-dropdown-proc-badge">
+                                {PROCEDURE_CONFIG[proc.procedureType].icon} {PROCEDURE_CONFIG[proc.procedureType].label}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Painel de Horários e Previsão de Chegada (ETA) */}
+          <div className="hud-eta-panel">
+            <div className="hud-eta-card">
+              <div className="hud-eta-item">
+                <span className="hud-eta-label">🎯 CHEGADA PROGRAMADA</span>
+                <strong className="hud-eta-time-val">
+                  {activeRouteDestinationAndSchedule?.scheduledArrivalTime || "--:--"}
+                </strong>
+              </div>
+
+              {etaCalculation ? (
+                <>
+                  <div className="hud-eta-divider" />
+                  <div className="hud-eta-item">
+                    <span className="hud-eta-label">⏱️ TEMPO RESTANTE</span>
+                    <strong className="hud-eta-val">
+                      {etaCalculation.remainingMinutes} min <small>({etaCalculation.distanceKm} km)</small>
+                    </strong>
+                  </div>
+
+                  <div className="hud-eta-divider" />
+                  <div className="hud-eta-item">
+                    <span className="hud-eta-label">🏁 PREVISÃO DE CHEGADA (ETA)</span>
+                    <div className="hud-eta-arrival-row">
+                      <strong className="hud-eta-time-val highlight">
+                        {etaCalculation.etaTimeString}
+                      </strong>
+                      {etaCalculation.delayStatus === "delayed" ? (
+                        <span className="hud-status-tag is-delayed">
+                          ⚠️ +{etaCalculation.delayMinutes}m atraso
+                        </span>
+                      ) : etaCalculation.delayStatus === "on-time" ? (
+                        <span className="hud-status-tag is-ontime">
+                          ✓ No horário
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="hud-eta-divider" />
+                  <div className="hud-eta-item">
+                    <span className="hud-eta-label">📍 PREVISÃO GPS</span>
+                    <small className="hud-eta-hint">
+                      {gpsState === "tracking" ? "Calculando distância ao vivo…" : "Ative o GPS para calcular ETA"}
+                    </small>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
