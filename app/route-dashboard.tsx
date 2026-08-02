@@ -1797,24 +1797,37 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
   }
 
   function clearAllRoutes() {
-    if (!routes.length) {
+    const hasGpsDetails =
+      Object.keys(gpsPointCatalog.segmentDetails).length > 0 ||
+      Object.keys(gpsPointCatalog.segmentColors).length > 0 ||
+      Object.keys(gpsPointCatalog.segmentEndpoints).length > 0 ||
+      gpsPointCatalog.manualPoints.length > 0 ||
+      Object.keys(gpsPointConfigs).length > 0;
+
+    if (!routes.length && !hasGpsDetails) {
       setBackupMessage({
         type: "error",
-        text: "Não há rotas cadastradas para apagar."
+        text: "Não há rotas, trechos ou dados GPS cadastrados para apagar."
       });
       return;
     }
 
     const confirmed = window.confirm(
-      "Tem certeza que deseja APAGAR TODAS AS ROTAS? Esta ação zerará a lista de rotas programadas."
+      "Tem certeza que deseja APAGAR TODAS AS ROTAS E DADOS DO GPS? Esta ação zerará a lista de rotas, trechos e marcadores do GPS."
     );
     if (!confirmed) return;
 
     setRoutes([]);
     setSelectedId("");
+    setGpsPointConfigs({});
+    setGpsPointCatalog(EMPTY_GPS_POINT_CATALOG);
+    try {
+      localStorage.removeItem("truck-bin:active-navigation-key");
+    } catch {}
+
     setBackupMessage({
       type: "success",
-      text: "Todas as rotas foram apagadas com sucesso. O sistema está zerado!"
+      text: "Todas as rotas, trechos e dados do GPS foram apagados com sucesso. O sistema está zerado!"
     });
   }
 
@@ -3498,14 +3511,14 @@ function BackupModal({
                 <Trash2 size={20} />
               </span>
               <div>
-                <h3>Zerar todas as rotas</h3>
+                <h3>Zerar rotas e dados GPS</h3>
                 <p>
-                  Apague todas as {routeCount} {routeCount === 1 ? "rota" : "rotas"} cadastradas para deixar a lista totalmente limpa.
+                  Apague todas as rotas programadas, trechos manuais e configurações do GPS para deixar tudo limpo.
                 </p>
               </div>
               <button className="danger-button" type="button" onClick={onClearAllRoutes}>
                 <Trash2 size={17} />
-                Apagar rotas
+                Apagar rotas e GPS
               </button>
             </article>
           </div>
