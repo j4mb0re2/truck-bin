@@ -2025,19 +2025,11 @@ export function GpsTrackingView({
       <main className="gps-page is-navigation-fullscreen">
         <div className="gps-navigation-hud">
           <div className="hud-card-main">
-            <div className="hud-route-badge">
-              <Navigation size={15} className="gps-nav-icon-spin" />
-              <span>NAVEGAÇÃO</span>
+            <div className={`hud-route-badge ${gpsState === "tracking" ? "is-gps-on" : "is-gps-off"}`}>
+              <Navigation size={18} className={gpsState === "tracking" ? "gps-nav-icon-spin" : ""} />
             </div>
             <div className="hud-route-title">
               <strong>{currentActiveNavTitle}</strong>
-              <span>
-                {gpsState === "tracking"
-                  ? "🟢 GPS Ao Vivo"
-                  : gpsState === "searching"
-                    ? "🟡 Buscando sinal GPS..."
-                    : `🔴 ${gpsMessage}`}
-              </span>
             </div>
           </div>
 
