@@ -1796,6 +1796,28 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     }
   }
 
+  function clearAllRoutes() {
+    if (!routes.length) {
+      setBackupMessage({
+        type: "error",
+        text: "Não há rotas cadastradas para apagar."
+      });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Tem certeza que deseja APAGAR TODAS AS ROTAS? Esta ação zerará a lista de rotas programadas."
+    );
+    if (!confirmed) return;
+
+    setRoutes([]);
+    setSelectedId("");
+    setBackupMessage({
+      type: "success",
+      text: "Todas as rotas foram apagadas com sucesso. O sistema está zerado!"
+    });
+  }
+
   const gpsPointsPanel = (
     <aside className="gps-points-panel panel" aria-labelledby="gps-points-title">
       <div className="gps-points-heading">
@@ -2262,6 +2284,7 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           message={backupMessage}
           onExport={exportBackup}
           onImport={importBackup}
+          onClearAllRoutes={clearAllRoutes}
           onClose={() => {
             setBackupOpen(false);
             setBackupMessage(null);
@@ -3386,12 +3409,14 @@ function BackupModal({
   message,
   onExport,
   onImport,
+  onClearAllRoutes,
   onClose
 }: {
   routeCount: number;
   message: BackupMessage | null;
   onExport: () => void;
   onImport: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  onClearAllRoutes: () => void;
   onClose: () => void;
 }) {
   return (
@@ -3407,7 +3432,7 @@ function BackupModal({
           <div>
             <span className="eyebrow">BACKUP E TRANSFERÊNCIA</span>
             <h2 id="backup-title">Leve suas rotas com você</h2>
-            <p>Salve tudo em um arquivo ou restaure em outro aparelho.</p>
+            <p>Salve tudo em um arquivo, restaure ou zere o aplicativo.</p>
           </div>
           <button type="button" aria-label="Fechar" onClick={onClose}>
             <X size={20} />
@@ -3466,6 +3491,22 @@ function BackupModal({
                 accept=".json,application/json"
                 onChange={onImport}
               />
+            </article>
+
+            <article className="backup-option">
+              <span className="backup-option-icon clear-icon">
+                <Trash2 size={20} />
+              </span>
+              <div>
+                <h3>Zerar todas as rotas</h3>
+                <p>
+                  Apague todas as {routeCount} {routeCount === 1 ? "rota" : "rotas"} cadastradas para deixar a lista totalmente limpa.
+                </p>
+              </div>
+              <button className="danger-button" type="button" onClick={onClearAllRoutes}>
+                <Trash2 size={17} />
+                Apagar rotas
+              </button>
             </article>
           </div>
 
