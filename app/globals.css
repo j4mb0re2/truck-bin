@@ -4526,12 +4526,47 @@ button {
 }
 
 /* Dynamic Interactive Route Selector & ETA Header in Navigation Mode */
+.hud-top-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.hud-icon-only-toggle {
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.9);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  transition: all 0.18s ease;
+}
+
+.hud-icon-only-toggle:hover {
+  background: rgba(14, 165, 233, 0.3);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #ffffff;
+}
+
 .hud-route-selector-container {
   position: relative;
   pointer-events: auto;
+  flex: 1;
+  min-width: 0;
 }
 
 .hud-route-selector-trigger {
+  width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(15, 23, 42, 0.9);
   backdrop-filter: blur(12px);
@@ -4541,6 +4576,7 @@ button {
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   text-align: left;
+  box-sizing: border-box;
 }
 
 .hud-route-selector-trigger:hover,
@@ -4700,13 +4736,17 @@ button {
 /* ETA & Scheduled Arrival HUD Card */
 .hud-eta-panel {
   pointer-events: auto;
+  width: 100%;
 }
 
 .hud-eta-card {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 14px;
-  padding: 8px 16px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 18px;
   background: rgba(15, 23, 42, 0.88);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -4719,10 +4759,12 @@ button {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 1;
+  min-width: 0;
 }
 
 .hud-eta-label {
-  font-size: 9px;
+  font-size: 9.5px;
   font-weight: 800;
   letter-spacing: 0.5px;
   color: #94a3b8;
@@ -4757,12 +4799,14 @@ button {
   width: 1px;
   height: 28px;
   background: rgba(255, 255, 255, 0.15);
+  flex-shrink: 0;
 }
 
 .hud-eta-arrival-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .hud-status-tag {
@@ -4793,14 +4837,49 @@ button {
 
 @media (max-width: 768px) {
   .gps-navigation-hud {
-    flex-wrap: wrap;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
     gap: 8px;
     padding: 8px 10px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .hud-top-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .hud-eta-panel {
+    width: 100%;
   }
 
   .hud-eta-card {
-    gap: 10px;
-    padding: 6px 12px;
+    width: 100%;
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    padding: 8px 8px;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .hud-eta-divider {
+    display: none;
+  }
+
+  .hud-eta-item {
+    text-align: center;
+    align-items: center;
+  }
+
+  .hud-eta-label {
+    font-size: 8px;
+    letter-spacing: 0.2px;
   }
 
   .hud-eta-time-val {
@@ -4809,6 +4888,21 @@ button {
 
   .hud-eta-time-val.highlight {
     font-size: 14px;
+  }
+
+  .hud-eta-val {
+    font-size: 12px;
+  }
+
+  .hud-eta-arrival-row {
+    flex-direction: column;
+    gap: 2px;
+    align-items: center;
+  }
+
+  .hud-status-tag {
+    font-size: 8.5px;
+    padding: 1px 4px;
   }
 }
 

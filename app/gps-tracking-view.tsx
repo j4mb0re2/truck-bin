@@ -2229,93 +2229,107 @@ export function GpsTrackingView({
     return (
       <main className="gps-page is-navigation-fullscreen">
         <div className="gps-navigation-hud">
-          {/* Seletor de Rota Interativo no Topo */}
-          <div className="hud-route-selector-container">
+          {/* Linha 1 do Topo: Botão de Camada à esquerda + Seletor de Rota */}
+          <div className="hud-top-bar-row">
+            {/* Botão de Modo Satélite/Ruas (Apenas Ícone no lado esquerdo) */}
             <button
+              className="hud-button hud-icon-only-toggle"
               type="button"
-              className={`hud-card-main hud-route-selector-trigger ${isRouteSelectorOpen ? "is-active" : ""}`}
-              onClick={() => setIsRouteSelectorOpen((prev) => !prev)}
-              aria-expanded={isRouteSelectorOpen}
-              aria-haspopup="true"
-              title="Clique para alternar a rota/trajeto que deseja seguir"
+              onClick={toggleMapLayerType}
+              title={mapLayerType === "satellite" ? "Alternar para Modo Ruas" : "Alternar para Modo Satélite"}
+              aria-label={mapLayerType === "satellite" ? "Modo Ruas" : "Modo Satélite"}
             >
-              <div className={`hud-route-badge ${gpsState === "tracking" ? "is-gps-on" : "is-gps-off"}`}>
-                <Navigation size={18} className={gpsState === "tracking" ? "gps-nav-icon-spin" : ""} />
-              </div>
-              <div className="hud-route-title">
-                <span className="hud-route-eyebrow">
-                  TRAJETO ATIVO <small>(Alternar ▾)</small>
-                </span>
-                <strong>
-                  {currentActiveNavTitle}
-                  <ChevronDown size={16} className={`hud-chevron ${isRouteSelectorOpen ? "is-open" : ""}`} />
-                </strong>
-              </div>
+              {mapLayerType === "satellite" ? <Layers size={20} /> : <Globe size={20} />}
             </button>
 
-            {/* Menu Dropdown de Seleção de Rotas */}
-            {isRouteSelectorOpen && (
-              <div className="hud-route-dropdown-menu">
-                <div className="hud-dropdown-header">
-                  <span>SELECIONE O TRAJETO A SEGUIR</span>
-                  <small>{sortedAllGpsItems.length} {sortedAllGpsItems.length === 1 ? "rota disponível" : "rotas disponíveis"}</small>
+            {/* Seletor de Rota Interativo */}
+            <div className="hud-route-selector-container">
+              <button
+                type="button"
+                className={`hud-card-main hud-route-selector-trigger ${isRouteSelectorOpen ? "is-active" : ""}`}
+                onClick={() => setIsRouteSelectorOpen((prev) => !prev)}
+                aria-expanded={isRouteSelectorOpen}
+                aria-haspopup="true"
+                title="Clique para alternar a rota/trajeto que deseja seguir"
+              >
+                <div className={`hud-route-badge ${gpsState === "tracking" ? "is-gps-on" : "is-gps-off"}`}>
+                  <Navigation size={18} className={gpsState === "tracking" ? "gps-nav-icon-spin" : ""} />
                 </div>
-                <div className="hud-dropdown-list">
-                  {sortedAllGpsItems.map((item) => {
-                    const itemKey = item.kind === "segment" ? `segment-${item.segment.index}` : `manual-${item.manualRoute.id}`;
-                    const activeKey = currentActiveNavItem
-                      ? currentActiveNavItem.kind === "segment"
-                        ? `segment-${currentActiveNavItem.segment.index}`
-                        : `manual-${currentActiveNavItem.manualRoute.id}`
-                      : null;
-                    const isSelected = itemKey === activeKey;
-                    const title = item.kind === "segment"
-                      ? (segmentDisplayLabels[item.segment.index] ?? routeSegmentLabel(item.segment.index))
-                      : item.manualRoute.name;
-
-                    const depTime = item.kind === "segment"
-                      ? (segmentDetails[item.segment.index]?.departureTime || item.segment.timing.startTime || "--:--")
-                      : (item.manualRoute.setup?.departureTime || "--:--");
-
-                    const arrTime = item.kind === "segment"
-                      ? (segmentDetails[item.segment.index]?.arrivalTime || item.segment.timing.endTime || "--:--")
-                      : (item.manualRoute.setup?.arrivalTime || "--:--");
-
-                    const proc = item.kind === "segment"
-                      ? segmentDetails[item.segment.index]?.procedure
-                      : item.manualRoute.setup?.procedure;
-
-                    return (
-                      <button
-                        key={itemKey}
-                        type="button"
-                        className={`hud-dropdown-item ${isSelected ? "is-selected" : ""}`}
-                        onClick={() => switchActiveNavigationRoute(itemKey)}
-                      >
-                        <div className="hud-dropdown-item-info">
-                          <div className="hud-dropdown-item-title-row">
-                            <strong>{title}</strong>
-                            {isSelected && <span className="hud-active-badge"><Check size={12} /> Selecionada</span>}
-                          </div>
-                          <div className="hud-dropdown-item-schedule">
-                            <Clock size={12} />
-                            <span>Horários: {depTime} → {arrTime}</span>
-                            {proc && (
-                              <span className="hud-dropdown-proc-badge">
-                                {PROCEDURE_CONFIG[proc.procedureType].icon} {PROCEDURE_CONFIG[proc.procedureType].label}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
+                <div className="hud-route-title">
+                  <span className="hud-route-eyebrow">
+                    TRAJETO ATIVO <small>(Alternar ▾)</small>
+                  </span>
+                  <strong>
+                    {currentActiveNavTitle}
+                    <ChevronDown size={16} className={`hud-chevron ${isRouteSelectorOpen ? "is-open" : ""}`} />
+                  </strong>
                 </div>
-              </div>
-            )}
+              </button>
+
+              {/* Menu Dropdown de Seleção de Rotas */}
+              {isRouteSelectorOpen && (
+                <div className="hud-route-dropdown-menu">
+                  <div className="hud-dropdown-header">
+                    <span>SELECIONE O TRAJETO A SEGUIR</span>
+                    <small>{sortedAllGpsItems.length} {sortedAllGpsItems.length === 1 ? "rota disponível" : "rotas disponíveis"}</small>
+                  </div>
+                  <div className="hud-dropdown-list">
+                    {sortedAllGpsItems.map((item) => {
+                      const itemKey = item.kind === "segment" ? `segment-${item.segment.index}` : `manual-${item.manualRoute.id}`;
+                      const activeKey = currentActiveNavItem
+                        ? currentActiveNavItem.kind === "segment"
+                          ? `segment-${currentActiveNavItem.segment.index}`
+                          : `manual-${currentActiveNavItem.manualRoute.id}`
+                        : null;
+                      const isSelected = itemKey === activeKey;
+                      const title = item.kind === "segment"
+                        ? (segmentDisplayLabels[item.segment.index] ?? routeSegmentLabel(item.segment.index))
+                        : item.manualRoute.name;
+
+                      const depTime = item.kind === "segment"
+                        ? (segmentDetails[item.segment.index]?.departureTime || item.segment.timing.startTime || "--:--")
+                        : (item.manualRoute.setup?.departureTime || "--:--");
+
+                      const arrTime = item.kind === "segment"
+                        ? (segmentDetails[item.segment.index]?.arrivalTime || item.segment.timing.endTime || "--:--")
+                        : (item.manualRoute.setup?.arrivalTime || "--:--");
+
+                      const proc = item.kind === "segment"
+                        ? segmentDetails[item.segment.index]?.procedure
+                        : item.manualRoute.setup?.procedure;
+
+                      return (
+                        <button
+                          key={itemKey}
+                          type="button"
+                          className={`hud-dropdown-item ${isSelected ? "is-selected" : ""}`}
+                          onClick={() => switchActiveNavigationRoute(itemKey)}
+                        >
+                          <div className="hud-dropdown-item-info">
+                            <div className="hud-dropdown-item-title-row">
+                              <strong>{title}</strong>
+                              {isSelected && <span className="hud-active-badge"><Check size={12} /> Selecionada</span>}
+                            </div>
+                            <div className="hud-dropdown-item-schedule">
+                              <Clock size={12} />
+                              <span>Horários: {depTime} → {arrTime}</span>
+                              {proc && (
+                                <span className="hud-dropdown-proc-badge">
+                                  {PROCEDURE_CONFIG[proc.procedureType].icon} {PROCEDURE_CONFIG[proc.procedureType].label}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Painel de Horários e Previsão de Chegada (ETA) */}
+          {/* Segunda Linha: Painel de Horários e Previsão de Chegada (ETA) em 100% de largura no celular */}
           <div className="hud-eta-panel">
             <div className="hud-eta-card">
               <div className="hud-eta-item">
@@ -2366,18 +2380,6 @@ export function GpsTrackingView({
                 </>
               )}
             </div>
-          </div>
-
-          <div className="hud-controls-group">
-            <button
-              className="hud-button hud-layer-toggle"
-              type="button"
-              onClick={toggleMapLayerType}
-              title="Alternar entre modo Satélite e modo Ruas"
-            >
-              {mapLayerType === "satellite" ? <Layers size={16} /> : <Globe size={16} />}
-              {mapLayerType === "satellite" ? "Modo Ruas" : "Modo Satélite"}
-            </button>
           </div>
         </div>
 
