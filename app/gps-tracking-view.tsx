@@ -2011,10 +2011,13 @@ export function GpsTrackingView({
 
   useEffect(() => {
     if (mapRef.current && mapReady) {
-      const timer = window.setTimeout(() => {
-        mapRef.current?.invalidateSize();
-      }, 120);
-      return () => window.clearTimeout(timer);
+      mapRef.current.invalidateSize();
+      const t1 = window.setTimeout(() => mapRef.current?.invalidateSize(), 100);
+      const t2 = window.setTimeout(() => mapRef.current?.invalidateSize(), 350);
+      return () => {
+        window.clearTimeout(t1);
+        window.clearTimeout(t2);
+      };
     }
   }, [mapReady, navigationMode]);
 

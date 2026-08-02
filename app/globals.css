@@ -3920,9 +3920,10 @@ button {
 
 .gps-page.is-navigation-fullscreen .gps-layout {
   position: relative;
-  flex: 1;
+  flex: 1 1 auto;
   width: 100%;
-  height: 100%;
+  height: 100% !important;
+  min-height: 0 !important;
   margin: 0;
   padding: 0;
   overflow: hidden;
@@ -3931,8 +3932,10 @@ button {
 .gps-page.is-navigation-fullscreen .gps-map-panel {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
   border-radius: 0;
   border: none;
   box-shadow: none;
@@ -3940,10 +3943,12 @@ button {
   padding: 0;
 }
 
-.gps-page.is-navigation-fullscreen .gps-map {
-  width: 100%;
-  height: 100%;
-  min-height: 100%;
+.gps-page.is-navigation-fullscreen .gps-map,
+.gps-page.is-navigation-fullscreen .leaflet-container {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
   border-radius: 0;
 }
 
