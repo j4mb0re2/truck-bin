@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import type { RouteSegmentTiming } from "./route-segment-utils";
 
@@ -111,17 +111,33 @@ function sampleSegment(points: GpxCoordinate[], maxPoints: number) {
 
 export function loadGpxRoute(): GpxRouteData {
   try {
-    const source = readFileSync(path.join(process.cwd(), "rota.gpx"), "utf8");
-    const rawSegments: Array<{ points: GpxCoordinate[]; timing: RouteSegmentTiming }> = [];
-    const segmentExpression = /<trkseg\b[^>]*>([\s\S]*?)<\/trkseg>/gi;
-    let segmentMatch: RegExpExecArray | null;
+    const cwd = process.cwd();
+    const knownFiles = ["1.gpx", "rota.gpx"];
+    const targetFiles = knownFiles.filter((file) => existsSync(path.join(cwd, file)));
 
-    while ((segmentMatch = segmentExpression.exec(source))) {
-      const points = parseTrackPoints(segmentMatch[1]);
-      if (points.length) {
-        rawSegments.push({ points, timing: parseSegmentTiming(segmentMatch[1]) });
+    const rawSegments: Array<{ points: GpxCoordinate[]; timing: RouteSegmentTiming }> = [];
+    const waypoints: GpxWaypoint[] = [];
+
+    targetFiles.forEach((file) => {
+      try {
+        const filePath = path.join(cwd, file);
+        if (!existsSync(filePath)) return;
+        const source = readFileSync(filePath, "utf8");
+        waypoints.push(...parseWaypoints(source));
+
+        const segmentExpression = /<trkseg\b[^>]*>([\s\S]*?)<\/trkseg>/gi;
+        let segmentMatch: RegExpExecArray | null;
+
+        while ((segmentMatch = segmentExpression.exec(source))) {
+          const points = parseTrackPoints(segmentMatch[1]);
+          if (points.length) {
+            rawSegments.push({ points, timing: parseSegmentTiming(segmentMatch[1]) });
+          }
+        }
+      } catch {
+        // ignore single unreadable file
       }
-    }
+    });
 
     const nonEmptySegments = rawSegments.length || 1;
     const maxPerSegment = Math.max(120, Math.floor(MAX_RENDERED_POINTS / nonEmptySegments));
@@ -133,7 +149,7 @@ export function loadGpxRoute(): GpxRouteData {
     return {
       segments,
       segmentTimings,
-      waypoints: parseWaypoints(source),
+      waypoints,
       totalTrackPoints,
       renderedTrackPoints
     };
