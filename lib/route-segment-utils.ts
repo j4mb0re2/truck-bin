@@ -94,7 +94,7 @@ export function routeSegmentColor(index: number, customColors: RouteSegmentColor
 }
 
 export function routeSegmentLabel(index: number) {
-  if (index === 0) return "Trecho 1 — início da gravação";
+  if (index === 0) return "Rota 1";
   return `Trecho ${index + 1} — retomada após pausa`;
 }
 

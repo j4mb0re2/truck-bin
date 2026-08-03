@@ -168,7 +168,13 @@ const EMPTY_GPS_POINT_CATALOG: GpsPointCatalog = {
   manualPoints: [],
   pointCoordinates: {},
   segmentColors: {},
-  segmentDetails: {},
+  segmentDetails: {
+    0: {
+      name: "Rota 1",
+      departureTime: "06:35",
+      arrivalTime: "07:58"
+    }
+  },
   segmentEndpoints: {}
 };
 
@@ -649,7 +655,7 @@ function makeDemoRoutes(currentMinutes: number): TruckRoute[] {
   return [
     {
       id: "demo-toyota",
-      name: "Toyota Motomachi",
+      name: "Rota 1",
       departure: time(-240),
       arrivalForecast: time(-175),
       stops: [
