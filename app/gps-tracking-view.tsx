@@ -1357,6 +1357,86 @@ export function GpsTrackingView({
     };
   }, [livePosition, activeRouteDestinationAndSchedule, currentActiveNavItem]);
 
+  const [navClock, setNavClock] = useState(() => new Date());
+
+  useEffect(() => {
+    if (!navigationMode) return;
+    const interval = setInterval(() => {
+      setNavClock(new Date());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [navigationMode]);
+
+  const navProcedureDetails = useMemo(() => {
+    if (!navigationMode || !currentActiveNavItem) return null;
+
+    let proc: RouteSegmentProcedure | undefined;
+    let title = "";
+    let startTime = "";
+    let endTime = "";
+
+    if (currentActiveNavItem.kind === "segment") {
+      const idx = currentActiveNavItem.segment.index;
+      const detail = segmentDetails[idx];
+      proc = detail?.procedure;
+      title = segmentDisplayLabels[idx] ?? routeSegmentLabel(idx);
+      startTime = proc?.startTime || detail?.departureTime || currentActiveNavItem.segment.timing.startTime || "";
+      endTime = proc?.endTime || detail?.arrivalTime || currentActiveNavItem.segment.timing.endTime || "";
+    } else {
+      const setup = currentActiveNavItem.manualRoute.setup;
+      proc = setup?.procedure;
+      title = currentActiveNavItem.manualRoute.name;
+      startTime = proc?.startTime || setup.departureTime || "";
+      endTime = proc?.endTime || setup.arrivalTime || "";
+    }
+
+    const procConfig = proc?.procedureType
+      ? PROCEDURE_CONFIG[proc.procedureType]
+      : { label: title || "Trecho", icon: "🚚", description: "" };
+    const notes = proc?.notes?.trim() || "";
+
+    let timerString = "--:--:--";
+    let isOverdue = false;
+
+    if (endTime) {
+      const timeParts = endTime.split(":").map(Number);
+      if (timeParts.length >= 2 && !isNaN(timeParts[0]) && !isNaN(timeParts[1])) {
+        const targetDate = new Date(navClock);
+        targetDate.setHours(timeParts[0], timeParts[1], timeParts[2] || 0, 0);
+
+        const diffMs = targetDate.getTime() - navClock.getTime();
+        const absSec = Math.floor(Math.abs(diffMs) / 1000);
+        const hrs = Math.floor(absSec / 3600);
+        const mins = Math.floor((absSec % 3600) / 60);
+        const secs = absSec % 60;
+
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const formattedTime = hrs > 0
+          ? `${pad(hrs)}:${pad(mins)}:${pad(secs)}`
+          : `${pad(mins)}:${pad(secs)}`;
+
+        if (diffMs >= 0) {
+          timerString = `⏳ ${formattedTime}`;
+          isOverdue = false;
+        } else {
+          timerString = `⚠️ +${formattedTime}`;
+          isOverdue = true;
+        }
+      }
+    }
+
+    return {
+      title,
+      proc,
+      procConfig,
+      startTime,
+      endTime,
+      notes,
+      timerString,
+      isOverdue
+    };
+  }, [navigationMode, currentActiveNavItem, segmentDetails, segmentDisplayLabels, navClock]);
+
   // Checagem de Geofence: Detecta se o caminhão chegou ao local do procedimento
   useEffect(() => {
     if (!livePosition) return;
@@ -2715,6 +2795,7 @@ export function GpsTrackingView({
         {/* Botão de Orientação Norte com bússola (acima do botão de fechar) */}
         <button
           className={`nav-north-fab ${isNorthUp ? "is-active" : "is-off"}`}
+          style={navProcedureDetails ? { bottom: "144px" } : undefined}
           type="button"
           aria-label={isNorthUp ? "Modo Norte para cima ativado" : "Modo Norte para cima desativado"}
           title={isNorthUp ? "Modo Norte para Cima: Ativado (Clique para desativar)" : "Modo Norte para Cima: Desativado (Clique para ativar)"}
@@ -2727,6 +2808,7 @@ export function GpsTrackingView({
         {/* Botão redondo minimalista de Encerrar Navegação no canto inferior esquerdo */}
         <button
           className="nav-exit-fab"
+          style={navProcedureDetails ? { bottom: "84px" } : undefined}
           type="button"
           aria-label="Encerrar Navegação"
           title="Encerrar Navegação"
@@ -2738,6 +2820,7 @@ export function GpsTrackingView({
         {/* Botão redondo minimalista de Centralizar no canto inferior direito */}
         <button
           className="nav-recenter-fab"
+          style={navProcedureDetails ? { bottom: "84px" } : undefined}
           type="button"
           aria-label="Centralizar no caminhão"
           title="Centralizar no caminhão"
@@ -2758,6 +2841,38 @@ export function GpsTrackingView({
         >
           <Crosshair size={24} />
         </button>
+
+        {/* Barra de Status no Rodapé no Modo Navegação */}
+        {navProcedureDetails && (
+          <footer className="nav-footer-status-bar" aria-label="Status do procedimento no rodapé">
+            <div className="nav-footer-line-1">
+              <div className="nav-footer-proc-info">
+                <span className="nav-footer-proc-icon">{navProcedureDetails.procConfig.icon}</span>
+                <strong className="nav-footer-proc-title">
+                  {navProcedureDetails.proc
+                    ? navProcedureDetails.procConfig.label
+                    : navProcedureDetails.title}
+                </strong>
+              </div>
+
+              <div className="nav-footer-times-bar">
+                <span className="nav-footer-time-range">
+                  ⏰ {navProcedureDetails.startTime || "--:--"} → {navProcedureDetails.endTime || "--:--"}
+                </span>
+                <span className={`nav-footer-timer ${navProcedureDetails.isOverdue ? "is-overdue" : ""}`}>
+                  {navProcedureDetails.timerString}
+                </span>
+              </div>
+            </div>
+
+            <div className="nav-footer-line-2">
+              <span className="nav-footer-note-icon">📝</span>
+              <span className="nav-footer-note-text">
+                {navProcedureDetails.notes || "Sem observações cadastradas para este trecho."}
+              </span>
+            </div>
+          </footer>
+        )}
       </main>
     );
   }
