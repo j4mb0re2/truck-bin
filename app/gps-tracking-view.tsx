@@ -708,6 +708,50 @@ export function GpsTrackingView({
     navigationModeRef.current = navigationMode;
   }, [navigationMode]);
 
+  // Manter a tela do celular sempre ativa (sem entrar em stand-by) no modo navegação
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+
+  const requestWakeLock = useCallback(async () => {
+    if (typeof window === "undefined" || !("wakeLock" in navigator)) return;
+    try {
+      if (!wakeLockRef.current || wakeLockRef.current.released) {
+        wakeLockRef.current = await navigator.wakeLock.request("screen");
+      }
+    } catch {
+      // Ignora falhas silenciosamente (ex: modo de economia de energia ativado)
+    }
+  }, []);
+
+  const releaseWakeLock = useCallback(async () => {
+    if (wakeLockRef.current) {
+      try {
+        await wakeLockRef.current.release();
+      } catch {}
+      wakeLockRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!navigationMode) {
+      releaseWakeLock();
+      return;
+    }
+
+    requestWakeLock();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible" && navigationMode) {
+        requestWakeLock();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      releaseWakeLock();
+    };
+  }, [navigationMode, requestWakeLock, releaseWakeLock]);
+
   const [isNorthUp, setIsNorthUp] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("truck-bin:north-up-active");
