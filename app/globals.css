@@ -3244,13 +3244,9 @@ button {
   place-items: center;
 }
 
-.gps-truck-marker {
-  position: relative;
-}
-
 .gps-truck-marker > span {
-  width: 42px;
-  height: 42px;
+  width: 40px;
+  height: 40px;
   display: grid;
   place-items: center;
   background: #fff;
@@ -3258,26 +3254,6 @@ button {
   border-radius: 50%;
   box-shadow: 0 4px 14px rgba(44, 109, 158, 0.32);
   font-size: 20px;
-  position: relative;
-}
-
-.gps-truck-marker .truck-emoji {
-  display: inline-block;
-  transform: rotate(90deg);
-}
-
-.gps-truck-marker::before {
-  content: "▲";
-  position: absolute;
-  top: -9px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: #ef4444;
-  font-size: 11px;
-  font-weight: 900;
-  line-height: 1;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-  z-index: 5;
 }
 
 .gps-route-marker > span {

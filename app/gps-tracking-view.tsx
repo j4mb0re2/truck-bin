@@ -1428,7 +1428,7 @@ export function GpsTrackingView({
       const coordinates = leaflet.latLng(latitude, longitude);
       const truckIcon = leaflet.divIcon({
         className: "gps-truck-marker",
-        html: "<span><span class=\"truck-emoji\">🚚</span></span>",
+        html: "<span>🚚</span>",
         iconSize: [42, 42],
         iconAnchor: [21, 21]
       });
@@ -1436,7 +1436,7 @@ export function GpsTrackingView({
       if (!truckMarkerRef.current) {
         truckMarkerRef.current = leaflet
           .marker(coordinates, { icon: truckIcon, zIndexOffset: 800 })
-          .bindTooltip("Meu caminhão (Norte ↑)", { permanent: false, direction: "top" })
+          .bindTooltip("Meu caminhão", { permanent: false, direction: "top" })
           .addTo(map);
       } else {
         truckMarkerRef.current.setLatLng(coordinates);
