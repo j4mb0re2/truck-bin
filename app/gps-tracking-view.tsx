@@ -702,6 +702,34 @@ export function GpsTrackingView({
     addPointModeRef.current = isAddingPoint;
   }, [isAddingPoint]);
 
+  const navigationModeRef = useRef(navigationMode);
+  useEffect(() => {
+    navigationModeRef.current = navigationMode;
+  }, [navigationMode]);
+
+  const getNavigationCenter = useCallback(
+    (lat: number, lng: number, zoom: number, isNav: boolean) => {
+      const map = mapRef.current;
+      const leaflet = leafletRef.current;
+      if (!map || !leaflet) return [lat, lng] as [number, number];
+
+      if (!isNav) {
+        return leaflet.latLng(lat, lng);
+      }
+
+      const container = map.getContainer();
+      const height = container.clientHeight;
+      if (!height) return leaflet.latLng(lat, lng);
+
+      const targetLatLng = leaflet.latLng(lat, lng);
+      const targetPoint = map.project(targetLatLng, zoom);
+      // Desloca o centro do mapa para cima em 25% da altura, fazendo o caminhão ficar posicionado a 25% da parte inferior da tela
+      const centerPoint = leaflet.point(targetPoint.x, targetPoint.y - height * 0.25);
+      return map.unproject(centerPoint, zoom);
+    },
+    []
+  );
+
   const visibleRouteSegments = useMemo(
     () => getRenderedRouteSegments(route.segments, route.segmentTimings),
     [route.segmentTimings, route.segments]
@@ -1400,7 +1428,7 @@ export function GpsTrackingView({
       const coordinates = leaflet.latLng(latitude, longitude);
       const truckIcon = leaflet.divIcon({
         className: "gps-truck-marker",
-        html: "<span>🚚</span>",
+        html: "<span><span class=\"truck-emoji\">🚚</span></span>",
         iconSize: [42, 42],
         iconAnchor: [21, 21]
       });
@@ -1408,7 +1436,7 @@ export function GpsTrackingView({
       if (!truckMarkerRef.current) {
         truckMarkerRef.current = leaflet
           .marker(coordinates, { icon: truckIcon, zIndexOffset: 800 })
-          .bindTooltip("Meu caminhão", { permanent: false, direction: "top" })
+          .bindTooltip("Meu caminhão (Norte ↑)", { permanent: false, direction: "top" })
           .addTo(map);
       } else {
         truckMarkerRef.current.setLatLng(coordinates);
@@ -1430,10 +1458,12 @@ export function GpsTrackingView({
       }
 
       if (!isEditingPointsRef.current) {
-        map.flyTo(coordinates, Math.max(map.getZoom(), 15), { duration: 0.65 });
+        const zoom = Math.max(map.getZoom(), 15);
+        const center = getNavigationCenter(latitude, longitude, zoom, Boolean(navigationModeRef.current));
+        map.flyTo(center, zoom, { duration: 0.65 });
       }
     },
-    []
+    [getNavigationCenter]
   );
 
   const startTracking = useCallback(() => {
@@ -2212,16 +2242,17 @@ export function GpsTrackingView({
   }, [hiddenManualRouteIdSet, mapReady, selectedManualRouteId, selectedRouteSegmentIndex]);
 
   useEffect(() => {
-    if (mapRef.current && mapReady) {
-      mapRef.current.invalidateSize();
-      const t1 = window.setTimeout(() => mapRef.current?.invalidateSize(), 100);
-      const t2 = window.setTimeout(() => mapRef.current?.invalidateSize(), 350);
-      return () => {
-        window.clearTimeout(t1);
-        window.clearTimeout(t2);
-      };
+    if (mapRef.current && mapReady && navigationMode && livePositionRef.current) {
+      const zoom = Math.max(mapRef.current.getZoom(), 15);
+      const center = getNavigationCenter(
+        livePositionRef.current.latitude,
+        livePositionRef.current.longitude,
+        zoom,
+        true
+      );
+      mapRef.current.flyTo(center, zoom, { duration: 0.5 });
     }
-  }, [mapReady, navigationMode]);
+  }, [navigationMode, mapReady, getNavigationCenter]);
 
   useEffect(() => stopTracking, [stopTracking]);
 
@@ -2241,6 +2272,12 @@ export function GpsTrackingView({
             >
               {mapLayerType === "satellite" ? <Layers size={20} /> : <Globe size={20} />}
             </button>
+
+            {/* Indicador de Orientação: Norte Fixado Para Cima */}
+            <div className="hud-north-indicator" title="Mapa fixado com o Norte para cima">
+              <span className="north-arrow">▲</span>
+              <span className="north-label">NORTE</span>
+            </div>
 
             {/* Seletor de Rota Interativo */}
             <div className="hud-route-selector-container">
@@ -2412,10 +2449,14 @@ export function GpsTrackingView({
           title="Centralizar no caminhão"
           onClick={() => {
             if (mapRef.current && livePositionRef.current) {
-              mapRef.current.flyTo(
-                [livePositionRef.current.latitude, livePositionRef.current.longitude],
-                16
+              const zoom = 16;
+              const center = getNavigationCenter(
+                livePositionRef.current.latitude,
+                livePositionRef.current.longitude,
+                zoom,
+                true
               );
+              mapRef.current.flyTo(center, zoom);
             } else {
               centerRoute();
             }
@@ -2544,7 +2585,14 @@ export function GpsTrackingView({
                 type="button"
                 onClick={() => {
                   if (mapRef.current && livePosition) {
-                    mapRef.current.flyTo([livePosition.latitude, livePosition.longitude], 16);
+                    const zoom = 16;
+                    const center = getNavigationCenter(
+                      livePosition.latitude,
+                      livePosition.longitude,
+                      zoom,
+                      true
+                    );
+                    mapRef.current.flyTo(center, zoom);
                   }
                 }}
               >
