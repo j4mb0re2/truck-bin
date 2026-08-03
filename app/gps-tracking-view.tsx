@@ -20,11 +20,14 @@ import {
   Pencil,
   Plus,
   Radio,
+  RotateCcw,
   Route,
   Satellite,
   Save,
+  Trash2,
   TriangleAlert,
   Undo2,
+  Upload,
   X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -162,6 +165,38 @@ function manualRouteScheduleCopy(setup: ManualRouteSetup) {
   return `${departureCopy(setup.departureTime)}${arrivalCopy(setup.arrivalTime)}`;
 }
 
+export function parseGpxTextToCoordinates(gpxText: string): GpxCoordinate[] {
+  try {
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(gpxText, "text/xml");
+    const trkptNodes = xmlDoc.getElementsByTagName("trkpt");
+    const points: GpxCoordinate[] = [];
+
+    for (let i = 0; i < trkptNodes.length; i++) {
+      const lat = Number(trkptNodes[i].getAttribute("lat"));
+      const lon = Number(trkptNodes[i].getAttribute("lon"));
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        points.push({ latitude: lat, longitude: lon });
+      }
+    }
+
+    if (points.length >= 2) return points;
+
+    const matchRegex = /<trkpt\b[^>]*lat=["']([^"']+)["'][^>]*lon=["']([^"']+)["']/gi;
+    let match: RegExpExecArray | null;
+    while ((match = matchRegex.exec(gpxText)) !== null) {
+      const latitude = Number(match[1]);
+      const longitude = Number(match[2]);
+      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        points.push({ latitude, longitude });
+      }
+    }
+    return points;
+  } catch {
+    return [];
+  }
+}
+
 export function SegmentDetailsForm({
   segmentIndex,
   detail,
@@ -171,11 +206,17 @@ export function SegmentDetailsForm({
   canMarkEndpoints,
   isMarkingStart,
   isMarkingEnd,
+  hasCustomTrack,
+  isTrackCleared,
+  pointCount,
   onSave,
   onAssignEndpoint,
   onMarkEndpoint,
   onOpenProcedureModal,
-  onOpenProcedurePopup
+  onOpenProcedurePopup,
+  onImportGpxTrack,
+  onClearTrack,
+  onRestoreTrack
 }: {
   segmentIndex: number;
   detail?: RouteSegmentDetail;
@@ -185,15 +226,22 @@ export function SegmentDetailsForm({
   canMarkEndpoints?: boolean;
   isMarkingStart?: boolean;
   isMarkingEnd?: boolean;
+  hasCustomTrack?: boolean;
+  isTrackCleared?: boolean;
+  pointCount?: number;
   onSave: (detail: RouteSegmentDetail) => void;
   onAssignEndpoint: (side: SegmentEndpointSide, pointId: string | null) => void;
   onMarkEndpoint: (side: SegmentEndpointSide) => void;
   onOpenProcedureModal: () => void;
   onOpenProcedurePopup?: (title: string, procedure: RouteSegmentProcedure) => void;
+  onImportGpxTrack?: (points: GpxCoordinate[]) => void;
+  onClearTrack?: () => void;
+  onRestoreTrack?: () => void;
 }) {
   const [name, setName] = useState(detail?.name ?? "");
   const [departureTime, setDepartureTime] = useState(detail?.departureTime ?? "");
   const [arrivalTime, setArrivalTime] = useState(detail?.arrivalTime ?? "");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const startPointId = endpoints.startPointId ?? "";
   const endPointId = endpoints.endPointId ?? "";
@@ -201,6 +249,26 @@ export function SegmentDetailsForm({
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     onSave({ name, departureTime, arrivalTime, procedure: detail?.procedure });
+  }
+
+  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      if (text) {
+        const points = parseGpxTextToCoordinates(text);
+        if (points.length >= 2) {
+          onImportGpxTrack?.(points);
+        } else {
+          alert("O arquivo GPX selecionado não contém coordenadas válidas (<trkpt>).");
+        }
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = "";
   }
 
   return (
@@ -334,10 +402,64 @@ export function SegmentDetailsForm({
           </button>
         </div>
       </div>
+
+      <div className="gps-track-action-bar">
+        <input
+          type="file"
+          accept=".gpx"
+          ref={fileInputRef}
+          style={{ display: "none" }}
+          onChange={handleFileChange}
+        />
+        <button
+          className="gps-action-btn import-gpx-btn"
+          type="button"
+          disabled={disabled}
+          onClick={() => fileInputRef.current?.click()}
+          title="Importar um arquivo GPX individual para esta rota/trecho"
+        >
+          <Upload size={13} />
+          <span>Importar GPX</span>
+        </button>
+
+        {isTrackCleared ? (
+          <button
+            className="gps-action-btn restore-track-btn"
+            type="button"
+            disabled={disabled}
+            onClick={onRestoreTrack}
+            title="Restaurar trajeto original desta rota no mapa"
+          >
+            <RotateCcw size={13} />
+            <span>Restaurar trajeto</span>
+          </button>
+        ) : (
+          <button
+            className="gps-action-btn clear-track-btn"
+            type="button"
+            disabled={disabled}
+            onClick={onClearTrack}
+            title="Apagar trajeto desta rota do mapa"
+          >
+            <Trash2 size={13} />
+            <span>Apagar trajeto</span>
+          </button>
+        )}
+
+        {hasCustomTrack && !isTrackCleared && (
+          <span className="gps-track-status-tag is-custom">
+            GPX customizado ({pointCount ?? 0} pts)
+          </span>
+        )}
+        {isTrackCleared && (
+          <span className="gps-track-status-tag is-cleared">
+            Trajeto apagado do mapa
+          </span>
+        )}
+      </div>
     </form>
   );
 }
-
 export function ManualRouteDetailsForm({
   routeName,
   setup,
@@ -346,9 +468,13 @@ export function ManualRouteDetailsForm({
   canMarkEndpoints,
   isMarkingStart,
   isMarkingEnd,
+  hasTrack,
+  pointCount,
   onMarkEndpoint,
   onOpenProcedureModal,
   onOpenProcedurePopup,
+  onImportGpxTrack,
+  onClearTrack,
   onSave
 }: {
   routeName: string;
@@ -358,9 +484,13 @@ export function ManualRouteDetailsForm({
   canMarkEndpoints: boolean;
   isMarkingStart: boolean;
   isMarkingEnd: boolean;
+  hasTrack?: boolean;
+  pointCount?: number;
   onMarkEndpoint: (side: SegmentEndpointSide) => void;
   onOpenProcedureModal?: () => void;
   onOpenProcedurePopup?: (title: string, procedure: RouteSegmentProcedure) => void;
+  onImportGpxTrack?: (points: GpxCoordinate[]) => void;
+  onClearTrack?: () => void;
   onSave: (name: string, setup: ManualRouteSetup) => void;
 }) {
   const [name, setName] = useState(() => routeName);
@@ -368,6 +498,7 @@ export function ManualRouteDetailsForm({
   const [endPointId, setEndPointId] = useState(() => setup.endPointId ?? "");
   const [departureTime, setDepartureTime] = useState(() => setup.departureTime ?? "");
   const [arrivalTime, setArrivalTime] = useState(() => setup.arrivalTime ?? "");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -378,6 +509,26 @@ export function ManualRouteDetailsForm({
       arrivalTime,
       procedure: setup.procedure
     });
+  }
+
+  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      if (text) {
+        const points = parseGpxTextToCoordinates(text);
+        if (points.length >= 2) {
+          onImportGpxTrack?.(points);
+        } else {
+          alert("O arquivo GPX selecionado não contém coordenadas válidas (<trkpt>).");
+        }
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = "";
   }
 
   return (
@@ -511,6 +662,45 @@ export function ManualRouteDetailsForm({
           </button>
         </div>
       </div>
+
+      <div className="gps-track-action-bar">
+        <input
+          type="file"
+          accept=".gpx"
+          ref={fileInputRef}
+          style={{ display: "none" }}
+          onChange={handleFileChange}
+        />
+        <button
+          className="gps-action-btn import-gpx-btn"
+          type="button"
+          disabled={disabled}
+          onClick={() => fileInputRef.current?.click()}
+          title="Importar um arquivo GPX individual para esta rota"
+        >
+          <Upload size={13} />
+          <span>Importar GPX</span>
+        </button>
+
+        {hasTrack ? (
+          <button
+            className="gps-action-btn clear-track-btn"
+            type="button"
+            disabled={disabled}
+            onClick={onClearTrack}
+            title="Apagar trajeto desta rota do mapa"
+          >
+            <Trash2 size={13} />
+            <span>Apagar trajeto</span>
+          </button>
+        ) : null}
+
+        {hasTrack && (
+          <span className="gps-track-status-tag is-custom">
+            Trajeto ativo ({pointCount ?? 0} pts)
+          </span>
+        )}
+      </div>
     </form>
   );
 }
@@ -527,6 +717,8 @@ export function GpsTrackingView({
   autoStartNavigation,
   navigationMode,
   activeRouteName,
+  customSegmentTracks,
+  clearedSegmentIndices,
   onExitNavigation,
   onAddPoint,
   onEditPoint,
@@ -540,6 +732,11 @@ export function GpsTrackingView({
   onAssignManualRouteEndpoint,
   onCreateManualRouteEndpoint,
   onCreateManualRoute,
+  onImportSegmentGpx,
+  onClearSegmentTrack,
+  onRestoreSegmentTrack,
+  onImportRouteGpx,
+  onClearRouteTrack,
   onBack
 }: {
   route: GpxRouteData;
@@ -553,6 +750,8 @@ export function GpsTrackingView({
   autoStartNavigation?: boolean;
   navigationMode?: boolean;
   activeRouteName?: string;
+  customSegmentTracks?: Record<number, GpxCoordinate[]>;
+  clearedSegmentIndices?: number[];
   onExitNavigation?: () => void;
   onAddPoint: (coordinate: GpxCoordinate) => void;
   onEditPoint: (pointId: string) => void;
@@ -586,6 +785,11 @@ export function GpsTrackingView({
     coordinate: GpxCoordinate
   ) => void;
   onCreateManualRoute: (points: GpxCoordinate[]) => void;
+  onImportSegmentGpx?: (segmentIndex: number, points: GpxCoordinate[]) => void;
+  onClearSegmentTrack?: (segmentIndex: number) => void;
+  onRestoreSegmentTrack?: (segmentIndex: number) => void;
+  onImportRouteGpx?: (routeId: string, points: GpxCoordinate[]) => void;
+  onClearRouteTrack?: (routeId: string) => void;
   onBack: () => void;
 }) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -810,8 +1014,8 @@ export function GpsTrackingView({
   }, [getNavigationCenter]);
 
   const visibleRouteSegments = useMemo(
-    () => getRenderedRouteSegments(route.segments, route.segmentTimings),
-    [route.segmentTimings, route.segments]
+    () => getRenderedRouteSegments(route.segments, route.segmentTimings, customSegmentTracks, clearedSegmentIndices),
+    [clearedSegmentIndices, customSegmentTracks, route.segmentTimings, route.segments]
   );
   const segmentDisplayLabels = useMemo(
     () => Object.fromEntries(
@@ -2951,7 +3155,7 @@ export function GpsTrackingView({
                           Gravação: {formatRecordingTime(segment.timing.startTime)} → {formatRecordingTime(segment.timing.endTime)}
                         </span>
                         <SegmentDetailsForm
-                          key={`${segment.index}:${segmentDetails[segment.index]?.name ?? ""}:${segmentDetails[segment.index]?.departureTime ?? ""}:${segmentDetails[segment.index]?.arrivalTime ?? ""}`}
+                          key={`${segment.index}:${segmentDetails[segment.index]?.name ?? ""}:${segmentDetails[segment.index]?.departureTime ?? ""}:${segmentDetails[segment.index]?.arrivalTime ?? ""}:${Boolean(customSegmentTracks?.[segment.index])}:${clearedSegmentIndices?.includes(segment.index)}`}
                           segmentIndex={segment.index}
                           detail={segmentDetails[segment.index]}
                           endpoints={endpoints}
@@ -2960,11 +3164,17 @@ export function GpsTrackingView({
                           canMarkEndpoints={mapReady && !isEditingPoints}
                           isMarkingStart={isMarkingStart}
                           isMarkingEnd={isMarkingEnd}
+                          hasCustomTrack={Boolean(customSegmentTracks?.[segment.index]?.length)}
+                          isTrackCleared={clearedSegmentIndices?.includes(segment.index)}
+                          pointCount={customSegmentTracks?.[segment.index]?.length || segment.points.length}
                           onSave={(detail) => onSaveSegmentDetails(segment.index, detail)}
                           onAssignEndpoint={(side, pointId) =>
                             onAssignSegmentEndpoint(segment.index, side, pointId)
                           }
                           onMarkEndpoint={(side) => selectSegmentEndpointOnMap(segment.index, side)}
+                          onImportGpxTrack={(pts) => onImportSegmentGpx?.(segment.index, pts)}
+                          onClearTrack={() => onClearSegmentTrack?.(segment.index)}
+                          onRestoreTrack={() => onRestoreSegmentTrack?.(segment.index)}
                           onOpenProcedureModal={() =>
                             setProcedureModalTarget({
                               kind: "segment",
@@ -3034,7 +3244,7 @@ export function GpsTrackingView({
                         Início: {setup.departureTime || "não definido"} → Fim: {setup.arrivalTime || "não definido"}
                       </span>
                       <ManualRouteDetailsForm
-                        key={`${manualRoute.id}:${manualRoute.name}:${setup.startPointId ?? ""}:${setup.endPointId ?? ""}:${setup.departureTime ?? ""}:${setup.arrivalTime ?? ""}`}
+                        key={`${manualRoute.id}:${manualRoute.name}:${setup.startPointId ?? ""}:${setup.endPointId ?? ""}:${setup.departureTime ?? ""}:${setup.arrivalTime ?? ""}:${manualRoute.points.length}`}
                         routeName={manualRoute.name}
                         setup={setup}
                         waypoints={route.waypoints}
@@ -3042,7 +3252,11 @@ export function GpsTrackingView({
                         canMarkEndpoints={mapReady && !isEditingPoints && !isDrawingManualRoute}
                         isMarkingStart={isMarkingStart}
                         isMarkingEnd={isMarkingEnd}
+                        hasTrack={manualRoute.points.length >= 2}
+                        pointCount={manualRoute.points.length}
                         onMarkEndpoint={(side) => selectManualRouteEndpointOnMap(manualRoute.id, side)}
+                        onImportGpxTrack={(pts) => onImportRouteGpx?.(manualRoute.id, pts)}
+                        onClearTrack={() => onClearRouteTrack?.(manualRoute.id)}
                         onSave={(name, nextSetup) =>
                           onSaveManualRouteSetup(manualRoute.id, name, nextSetup)
                         }

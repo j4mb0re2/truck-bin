@@ -20,6 +20,7 @@ import {
   Navigation,
   Pencil,
   Plus,
+  RotateCcw,
   Route as RouteIcon,
   Search,
   ShieldCheck,
@@ -30,7 +31,7 @@ import {
   X
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { GpsTrackingView } from "./gps-tracking-view";
+import { GpsTrackingView, parseGpxTextToCoordinates } from "./gps-tracking-view";
 import type { GpxCoordinate, GpxRouteData, GpxWaypoint } from "../lib/gpx-route";
 import {
   PROCEDURE_CONFIG,
@@ -105,6 +106,8 @@ type GpsPointCatalog = {
   segmentColors: RouteSegmentColors;
   segmentDetails: RouteSegmentDetails;
   segmentEndpoints: RouteSegmentEndpoints;
+  customSegmentTracks?: Record<number, GpxCoordinate[]>;
+  clearedSegmentIndices?: number[];
 };
 type GpsPointSourceCatalog = Pick<
   GpsPointCatalog,
@@ -175,7 +178,9 @@ const EMPTY_GPS_POINT_CATALOG: GpsPointCatalog = {
       arrivalTime: "07:58"
     }
   },
-  segmentEndpoints: {}
+  segmentEndpoints: {},
+  customSegmentTracks: {},
+  clearedSegmentIndices: []
 };
 
 type BackupMessage = {
@@ -560,6 +565,26 @@ function normalizeGpsPointCatalog(value: unknown): GpsPointCatalog {
     })
     : [];
 
+  const customSegmentTracks =
+    catalog.customSegmentTracks &&
+    typeof catalog.customSegmentTracks === "object" &&
+    !Array.isArray(catalog.customSegmentTracks)
+      ? Object.entries(catalog.customSegmentTracks).reduce<Record<number, GpxCoordinate[]>>(
+          (acc, [key, pts]) => {
+            const idx = Number(key);
+            if (Number.isInteger(idx) && idx >= 0 && Array.isArray(pts)) {
+              acc[idx] = (pts as GpxCoordinate[]).filter(isValidGpsCoordinate);
+            }
+            return acc;
+          },
+          {}
+        )
+      : {};
+
+  const clearedSegmentIndices = Array.isArray(catalog.clearedSegmentIndices)
+    ? catalog.clearedSegmentIndices.filter((idx): idx is number => Number.isInteger(idx) && idx >= 0)
+    : [];
+
   return {
     manualPoints,
     removedPointIds,
@@ -568,7 +593,9 @@ function normalizeGpsPointCatalog(value: unknown): GpsPointCatalog {
     pointOrder,
     segmentColors,
     segmentDetails,
-    segmentEndpoints
+    segmentEndpoints,
+    customSegmentTracks,
+    clearedSegmentIndices
   };
 }
 
@@ -1523,6 +1550,63 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
     );
   }
 
+  function importSegmentGpx(segmentIndex: number, points: GpxCoordinate[]) {
+    setGpsPointCatalog((current) => {
+      const customSegmentTracks = { ...(current.customSegmentTracks || {}), [segmentIndex]: points };
+      const clearedSegmentIndices = (current.clearedSegmentIndices || []).filter(
+        (idx) => idx !== segmentIndex
+      );
+      return { ...current, customSegmentTracks, clearedSegmentIndices };
+    });
+  }
+
+  function clearSegmentTrack(segmentIndex: number) {
+    setGpsPointCatalog((current) => {
+      const customSegmentTracks = { ...(current.customSegmentTracks || {}) };
+      delete customSegmentTracks[segmentIndex];
+      const clearedSegmentIndices = Array.from(
+        new Set([...(current.clearedSegmentIndices || []), segmentIndex])
+      );
+      return { ...current, customSegmentTracks, clearedSegmentIndices };
+    });
+  }
+
+  function restoreSegmentTrack(segmentIndex: number) {
+    setGpsPointCatalog((current) => {
+      const customSegmentTracks = { ...(current.customSegmentTracks || {}) };
+      delete customSegmentTracks[segmentIndex];
+      const clearedSegmentIndices = (current.clearedSegmentIndices || []).filter(
+        (idx) => idx !== segmentIndex
+      );
+      return { ...current, customSegmentTracks, clearedSegmentIndices };
+    });
+  }
+
+  function importRouteGpx(routeId: string, points: GpxCoordinate[]) {
+    setRoutes((current) =>
+      current.map((route) =>
+        route.id === routeId
+          ? {
+              ...route,
+              manualPath: points,
+              manualSetup: {
+                departureTime: route.manualSetup?.departureTime || route.departure || "07:00",
+                arrivalTime: route.manualSetup?.arrivalTime || route.arrivalForecast || "08:00"
+              }
+            }
+          : route
+      )
+    );
+  }
+
+  function clearRouteTrack(routeId: string) {
+    setRoutes((current) =>
+      current.map((route) =>
+        route.id === routeId ? { ...route, manualPath: undefined } : route
+      )
+    );
+  }
+
   function saveManualRouteSetup(routeId: string, name: string, setup: ManualRouteSetup) {
     const pointsById = new globalThis.Map(gpsPoints.map((point) => [point.id, point]));
     const startPointId =
@@ -1975,6 +2059,8 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           navigationMode={navigationMode}
           autoStartNavigation={navigationMode}
           activeRouteName={selectedRoute?.name || routes[0]?.name}
+          customSegmentTracks={gpsPointCatalog.customSegmentTracks}
+          clearedSegmentIndices={gpsPointCatalog.clearedSegmentIndices}
           onExitNavigation={() => {
             setNavigationMode(false);
             setViewMode("routes");
@@ -1991,6 +2077,11 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
           onAssignManualRouteEndpoint={assignManualRouteEndpoint}
           onCreateManualRouteEndpoint={addGpsManualRouteEndpointFromMap}
           onCreateManualRoute={createManualRouteFromMap}
+          onImportSegmentGpx={importSegmentGpx}
+          onClearSegmentTrack={clearSegmentTrack}
+          onRestoreSegmentTrack={restoreSegmentTrack}
+          onImportRouteGpx={importRouteGpx}
+          onClearRouteTrack={clearRouteTrack}
           onBack={() => {
             setNavigationMode(false);
             setViewMode("routes");
@@ -2275,13 +2366,19 @@ export function RouteDashboard({ gpxRoute }: { gpxRoute: GpxRouteData }) {
                 gpsPoints={gpsPoints}
                 nowMinutes={nowMinutes}
                 onEdit={() => selectedRoute && openEditRoute(selectedRoute)}
-                onOpenGpsSegment={() => {
+                onOpenGpsSegment={(segmentIndex) => {
+                  setSelectedId(`gpx-segment-${segmentIndex}`);
                   setViewMode("gps");
                 }}
                 onOpenGpsPoint={(pointId) => openGps(pointId)}
                 onStartNavigation={() => startNavigationMode(selectedUnifiedItem.id)}
                 onAddFuel={() => selectedRoute && addFuelStop(selectedRoute)}
                 onDelete={() => selectedRoute && deleteRoute(selectedRoute)}
+                onImportSegmentGpx={importSegmentGpx}
+                onClearSegmentTrack={clearSegmentTrack}
+                onRestoreSegmentTrack={restoreSegmentTrack}
+                onImportRouteGpx={importRouteGpx}
+                onClearRouteTrack={clearRouteTrack}
               />
             ) : (
               <div className="detail-empty">
@@ -2353,7 +2450,12 @@ function RouteDetail({
   onOpenGpsPoint,
   onStartNavigation,
   onAddFuel,
-  onDelete
+  onDelete,
+  onImportSegmentGpx,
+  onClearSegmentTrack,
+  onRestoreSegmentTrack,
+  onImportRouteGpx,
+  onClearRouteTrack
 }: {
   route: TruckRoute | null;
   selectedGpxSegmentIndex?: number;
@@ -2367,10 +2469,21 @@ function RouteDetail({
   onStartNavigation: () => void;
   onAddFuel: () => void;
   onDelete: () => void;
+  onImportSegmentGpx: (segmentIndex: number, points: GpxCoordinate[]) => void;
+  onClearSegmentTrack: (segmentIndex: number) => void;
+  onRestoreSegmentTrack: (segmentIndex: number) => void;
+  onImportRouteGpx: (routeId: string, points: GpxCoordinate[]) => void;
+  onClearRouteTrack: (routeId: string) => void;
 }) {
   const renderedSegments = useMemo(
-    () => getRenderedRouteSegments(gpxRoute.segments, gpxRoute.segmentTimings),
-    [gpxRoute.segments, gpxRoute.segmentTimings]
+    () =>
+      getRenderedRouteSegments(
+        gpxRoute.segments,
+        gpxRoute.segmentTimings,
+        gpsPointCatalog.customSegmentTracks,
+        gpsPointCatalog.clearedSegmentIndices
+      ),
+    [gpxRoute.segments, gpxRoute.segmentTimings, gpsPointCatalog.customSegmentTracks, gpsPointCatalog.clearedSegmentIndices]
   );
 
   const pointsById = useMemo(

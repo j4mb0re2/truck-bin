@@ -111,15 +111,24 @@ export function routeSegmentDisplayLabel(
 
 export function getRenderedRouteSegments(
   segments: RouteCoordinate[][],
-  segmentTimings: RouteSegmentTiming[] = []
+  segmentTimings: RouteSegmentTiming[] = [],
+  customSegmentTracks: Record<number, RouteCoordinate[]> = {},
+  clearedSegmentIndices: number[] = []
 ) {
+  const clearedSet = new Set(clearedSegmentIndices);
   const renderedSegments: RenderedRouteSegment[] = [];
 
-  segments.forEach((points, sourceIndex) => {
+  segments.forEach((originalPoints, sourceIndex) => {
+    if (clearedSet.has(sourceIndex)) return;
+
+    const points = customSegmentTracks[sourceIndex]?.length
+      ? customSegmentTracks[sourceIndex]
+      : originalPoints;
+
     if (points.length < 2) return;
 
     renderedSegments.push({
-      index: renderedSegments.length,
+      index: sourceIndex,
       points,
       timing: segmentTimings[sourceIndex] ?? EMPTY_SEGMENT_TIMING
     });
