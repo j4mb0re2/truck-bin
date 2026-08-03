@@ -519,6 +519,15 @@ function normalizeGpsPointCatalog(value: unknown): GpsPointCatalog {
       )
       : {};
 
+  if (!segmentDetails[0] || segmentDetails[0].name === "Trecho 1 — início da gravação" || segmentDetails[0].name === "Trecho 1" || !segmentDetails[0].name) {
+    segmentDetails[0] = {
+      name: "Rota 1",
+      departureTime: segmentDetails[0]?.departureTime || "06:35",
+      arrivalTime: segmentDetails[0]?.arrivalTime || "07:58",
+      procedure: segmentDetails[0]?.procedure
+    };
+  }
+
   const segmentEndpoints =
     catalog.segmentEndpoints &&
     typeof catalog.segmentEndpoints === "object" &&

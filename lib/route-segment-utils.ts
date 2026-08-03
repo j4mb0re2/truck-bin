@@ -102,7 +102,11 @@ export function routeSegmentDisplayLabel(
   index: number,
   segmentDetails: RouteSegmentDetails = {}
 ) {
-  return segmentDetails[index]?.name?.trim() || routeSegmentLabel(index);
+  const custom = segmentDetails[index]?.name?.trim();
+  if (custom && custom !== "Trecho 1 — início da gravação" && custom !== "Trecho 1") {
+    return custom;
+  }
+  return routeSegmentLabel(index);
 }
 
 export function getRenderedRouteSegments(
