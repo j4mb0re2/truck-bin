@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ClipboardList,
   Clock,
+  Compass,
   Crosshair,
   Eye,
   EyeOff,
@@ -707,6 +708,19 @@ export function GpsTrackingView({
     navigationModeRef.current = navigationMode;
   }, [navigationMode]);
 
+  const [isNorthUp, setIsNorthUp] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("truck-bin:north-up-active");
+      return saved === null ? true : saved === "true";
+    }
+    return true;
+  });
+
+  const isNorthUpRef = useRef(isNorthUp);
+  useEffect(() => {
+    isNorthUpRef.current = isNorthUp;
+  }, [isNorthUp]);
+
   const getNavigationCenter = useCallback(
     (lat: number, lng: number, zoom: number, isNav: boolean) => {
       const map = mapRef.current;
@@ -729,6 +743,27 @@ export function GpsTrackingView({
     },
     []
   );
+
+  const toggleNorthUp = useCallback(() => {
+    setIsNorthUp((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("truck-bin:north-up-active", next ? "true" : "false");
+      } catch {}
+
+      if (next && mapRef.current && livePositionRef.current) {
+        const zoom = Math.max(mapRef.current.getZoom(), 15);
+        const center = getNavigationCenter(
+          livePositionRef.current.latitude,
+          livePositionRef.current.longitude,
+          zoom,
+          true
+        );
+        mapRef.current.flyTo(center, zoom, { duration: 0.5 });
+      }
+      return next;
+    });
+  }, [getNavigationCenter]);
 
   const visibleRouteSegments = useMemo(
     () => getRenderedRouteSegments(route.segments, route.segmentTimings),
@@ -1459,7 +1494,12 @@ export function GpsTrackingView({
 
       if (!isEditingPointsRef.current) {
         const zoom = Math.max(map.getZoom(), 15);
-        const center = getNavigationCenter(latitude, longitude, zoom, Boolean(navigationModeRef.current));
+        const center = getNavigationCenter(
+          latitude,
+          longitude,
+          zoom,
+          Boolean(navigationModeRef.current && isNorthUpRef.current)
+        );
         map.flyTo(center, zoom, { duration: 0.65 });
       }
     },
@@ -2273,12 +2313,6 @@ export function GpsTrackingView({
               {mapLayerType === "satellite" ? <Layers size={20} /> : <Globe size={20} />}
             </button>
 
-            {/* Indicador de Orientação: Norte Fixado Para Cima */}
-            <div className="hud-north-indicator" title="Mapa fixado com o Norte para cima">
-              <span className="north-arrow">▲</span>
-              <span className="north-label">NORTE</span>
-            </div>
-
             {/* Seletor de Rota Interativo */}
             <div className="hud-route-selector-container">
               <button
@@ -2429,6 +2463,18 @@ export function GpsTrackingView({
             />
           </div>
         </section>
+
+        {/* Botão de Orientação Norte com bússola (acima do botão de fechar) */}
+        <button
+          className={`nav-north-fab ${isNorthUp ? "is-active" : "is-off"}`}
+          type="button"
+          aria-label={isNorthUp ? "Modo Norte para cima ativado" : "Modo Norte para cima desativado"}
+          title={isNorthUp ? "Modo Norte para Cima: Ativado (Clique para desativar)" : "Modo Norte para Cima: Desativado (Clique para ativar)"}
+          onClick={toggleNorthUp}
+        >
+          <Compass size={24} />
+          <span className="nav-north-indicator-tag">N</span>
+        </button>
 
         {/* Botão redondo minimalista de Encerrar Navegação no canto inferior esquerdo */}
         <button
