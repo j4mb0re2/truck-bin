@@ -5197,13 +5197,14 @@ button {
 }
 
 .is-navigation-fullscreen .gps-map-panel .gps-map {
-  width: 180vmax !important;
-  height: 180vmax !important;
+  width: 100% !important;
+  height: 100% !important;
   position: absolute !important;
-  top: 50% !important;
-  left: 50% !important;
-  margin-top: -90vmax !important;
-  margin-left: -90vmax !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  margin: 0 !important;
   transform-origin: center center;
   transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1);
 }

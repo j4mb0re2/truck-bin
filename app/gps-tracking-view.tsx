@@ -2867,7 +2867,7 @@ export function GpsTrackingView({
           <div className="gps-map-panel panel">
             <div
               className={`gps-map${hasRouteFocus ? " is-focusing-route-segment" : ""}`}
-              style={navOrientationMode === "course-up" ? { transform: `rotate(${mapRotationAngle}deg)` } : undefined}
+              style={navOrientationMode === "course-up" ? { transform: `rotate(${mapRotationAngle}deg) scale(1.45)` } : undefined}
               ref={mapContainerRef}
               aria-label="Mapa de Navegação GPS"
             />
@@ -2921,15 +2921,24 @@ export function GpsTrackingView({
           aria-label="Centralizar no caminhão"
           title="Centralizar no caminhão"
           onClick={() => {
+            const zoom = 16;
             if (mapRef.current && livePositionRef.current) {
-              const zoom = 16;
               const center = getNavigationCenter(
                 livePositionRef.current.latitude,
                 livePositionRef.current.longitude,
                 zoom,
                 true
               );
-              mapRef.current.flyTo(center, zoom);
+              mapRef.current.flyTo(center, zoom, { duration: 0.5 });
+            } else if (mapRef.current && currentActiveRoutePoints.length > 0) {
+              const firstPt = currentActiveRoutePoints[0];
+              const center = getNavigationCenter(
+                firstPt.latitude,
+                firstPt.longitude,
+                zoom,
+                true
+              );
+              mapRef.current.flyTo(center, zoom, { duration: 0.5 });
             } else {
               centerRoute();
             }
