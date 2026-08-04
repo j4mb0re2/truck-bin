@@ -1058,30 +1058,12 @@ export function GpsTrackingView({
   }, [mapRotationAngle]);
 
   const getNavigationCenter = useCallback(
-    (lat: number, lng: number, zoom: number, isNav: boolean, rotationDeg: number = 0) => {
+    (lat: number, lng: number, zoom: number, isNav: boolean) => {
       const map = mapRef.current;
       const leaflet = leafletRef.current;
       if (!map || !leaflet) return [lat, lng] as [number, number];
 
-      if (!isNav) {
-        return leaflet.latLng(lat, lng);
-      }
-
-      const container = map.getContainer();
-      const height = container.clientHeight || (typeof window !== "undefined" ? window.innerHeight : 600);
-      if (!height) return leaflet.latLng(lat, lng);
-
-      const targetLatLng = leaflet.latLng(lat, lng);
-      const targetPoint = map.project(targetLatLng, zoom);
-
-      const rad = (rotationDeg * Math.PI) / 180;
-      const offsetDist = height * 0.25;
-
-      const offsetX = offsetDist * Math.sin(rad);
-      const offsetY = offsetDist * Math.cos(rad);
-
-      const centerPoint = leaflet.point(targetPoint.x - offsetX, targetPoint.y - offsetY);
-      return map.unproject(centerPoint, zoom);
+      return leaflet.latLng(lat, lng);
     },
     []
   );
@@ -1095,7 +1077,6 @@ export function GpsTrackingView({
         localStorage.setItem("truck-bin:nav-orientation-mode", next);
       } catch {}
 
-      const rot = next === "course-up" ? mapRotationAngleRef.current : 0;
       if (mapRef.current) {
         const zoom = Math.max(mapRef.current.getZoom(), 15);
         if (livePositionRef.current) {
@@ -1103,8 +1084,7 @@ export function GpsTrackingView({
             livePositionRef.current.latitude,
             livePositionRef.current.longitude,
             zoom,
-            true,
-            rot
+            true
           );
           mapRef.current.flyTo(center, zoom, { duration: 0.4 });
         } else if (currentActiveRoutePointsRef.current.length > 0) {
@@ -1113,8 +1093,7 @@ export function GpsTrackingView({
             firstPt.latitude,
             firstPt.longitude,
             zoom,
-            true,
-            rot
+            true
           );
           mapRef.current.flyTo(center, zoom, { duration: 0.4 });
         }
@@ -2789,27 +2768,6 @@ export function GpsTrackingView({
               aria-label={mapLayerType === "satellite" ? "Modo Ruas" : "Modo Satélite"}
             >
               {mapLayerType === "satellite" ? <Layers size={20} /> : <Globe size={20} />}
-            </button>
-
-            {/* Botão Liga/Desliga GPS Explícito no Topo */}
-            <button
-              className={`hud-button hud-gps-toggle-button ${gpsState === "tracking" ? "is-gps-active" : "is-gps-inactive"}`}
-              type="button"
-              onClick={gpsState === "tracking" ? stopTracking : startTracking}
-              title={gpsState === "tracking" ? "GPS LIGADO ao vivo. Clique para desligar" : "GPS DESLIGADO. Clique para ligar"}
-              aria-label={gpsState === "tracking" ? "GPS LIGADO" : "GPS DESLIGADO"}
-            >
-              {gpsState === "tracking" ? (
-                <>
-                  <LocateFixed size={18} className="gps-active-icon-pulse" />
-                  <span className="hud-gps-badge-text">GPS ON</span>
-                </>
-              ) : (
-                <>
-                  <LocateOff size={18} />
-                  <span className="hud-gps-badge-text">GPS OFF</span>
-                </>
-              )}
             </button>
 
             {/* Seletor de Rota Interativo */}
