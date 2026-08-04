@@ -58,6 +58,7 @@ type LivePosition = {
   latitude: number;
   longitude: number;
   accuracy: number;
+  heading?: number | null;
   updatedAt: string;
 };
 
@@ -131,6 +132,64 @@ function isSameCoordinate(first: GpxCoordinate, second: GpxCoordinate) {
     Math.abs(first.latitude - second.latitude) < 0.0000001 &&
     Math.abs(first.longitude - second.longitude) < 0.0000001
   );
+}
+
+export function calculateBearing(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const rad = Math.PI / 180;
+  const dLon = (lon2 - lon1) * rad;
+  const y = Math.sin(dLon) * Math.cos(lat2 * rad);
+  const x =
+    Math.cos(lat1 * rad) * Math.sin(lat2 * rad) -
+    Math.sin(lat1 * rad) * Math.cos(lat2 * rad) * Math.cos(dLon);
+  const brng = Math.atan2(y, x) * (180 / Math.PI);
+  return (brng + 360) % 360;
+}
+
+export function getUnwrappedAngle(currentAngle: number, targetAngle: number): number {
+  let diff = (targetAngle - currentAngle) % 360;
+  if (diff > 180) diff -= 360;
+  if (diff < -180) diff += 360;
+  return currentAngle + diff;
+}
+
+export function getHeadingFromRoutePoints(
+  currentLat: number,
+  currentLng: number,
+  points: GpxCoordinate[]
+): number {
+  if (points.length < 2) return 0;
+  let closestIdx = 0;
+  let minSqDist = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < points.length; i++) {
+    const sqDist = (currentLat - points[i].latitude) ** 2 + (currentLng - points[i].longitude) ** 2;
+    if (sqDist < minSqDist) {
+      minSqDist = sqDist;
+      closestIdx = i;
+    }
+  }
+
+  const nextIdx = Math.min(closestIdx + 1, points.length - 1);
+  if (nextIdx !== closestIdx) {
+    return calculateBearing(
+      points[closestIdx].latitude,
+      points[closestIdx].longitude,
+      points[nextIdx].latitude,
+      points[nextIdx].longitude
+    );
+  } else if (closestIdx > 0) {
+    return calculateBearing(
+      points[closestIdx - 1].latitude,
+      points[closestIdx - 1].longitude,
+      points[closestIdx].latitude,
+      points[closestIdx].longitude
+    );
+  }
+  return 0;
 }
 
 function gpsErrorMessage(error: GeolocationPositionError) {
@@ -956,18 +1015,16 @@ export function GpsTrackingView({
     };
   }, [navigationMode, requestWakeLock, releaseWakeLock]);
 
-  const [isNorthUp, setIsNorthUp] = useState<boolean>(() => {
+  const [navOrientationMode, setNavOrientationMode] = useState<"course-up" | "north-up">(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("truck-bin:north-up-active");
-      return saved === null ? true : saved === "true";
+      const saved = localStorage.getItem("truck-bin:nav-orientation-mode");
+      return (saved as "course-up" | "north-up") || "course-up";
     }
-    return true;
+    return "course-up";
   });
 
-  const isNorthUpRef = useRef(isNorthUp);
-  useEffect(() => {
-    isNorthUpRef.current = isNorthUp;
-  }, [isNorthUp]);
+  const [mapHeading, setMapHeading] = useState<number>(0);
+  const [mapRotationAngle, setMapRotationAngle] = useState<number>(0);
 
   const getNavigationCenter = useCallback(
     (lat: number, lng: number, zoom: number, isNav: boolean) => {
@@ -992,26 +1049,15 @@ export function GpsTrackingView({
     []
   );
 
-  const toggleNorthUp = useCallback(() => {
-    setIsNorthUp((prev) => {
-      const next = !prev;
+  const toggleOrientationMode = useCallback(() => {
+    setNavOrientationMode((prev) => {
+      const next = prev === "course-up" ? "north-up" : "course-up";
       try {
-        localStorage.setItem("truck-bin:north-up-active", next ? "true" : "false");
+        localStorage.setItem("truck-bin:nav-orientation-mode", next);
       } catch {}
-
-      if (next && mapRef.current && livePositionRef.current) {
-        const zoom = Math.max(mapRef.current.getZoom(), 15);
-        const center = getNavigationCenter(
-          livePositionRef.current.latitude,
-          livePositionRef.current.longitude,
-          zoom,
-          true
-        );
-        mapRef.current.flyTo(center, zoom, { duration: 0.5 });
-      }
       return next;
     });
-  }, [getNavigationCenter]);
+  }, []);
 
   const visibleRouteSegments = useMemo(
     () => getRenderedRouteSegments(route.segments, route.segmentTimings, customSegmentTracks, clearedSegmentIndices),
@@ -1212,6 +1258,40 @@ export function GpsTrackingView({
 
     return item;
   }, [sortedAllGpsItems, activeNavKey]);
+
+  const currentActiveRoutePoints = useMemo(() => {
+    if (!currentActiveNavItem) return [];
+    if (currentActiveNavItem.kind === "segment") {
+      return currentActiveNavItem.segment.points;
+    }
+    return currentActiveNavItem.manualRoute.points;
+  }, [currentActiveNavItem]);
+
+  useEffect(() => {
+    if (!navigationMode) return;
+
+    let targetHeading = 0;
+
+    if (livePosition && Number.isFinite(livePosition.heading) && (livePosition.heading as number) >= 0) {
+      targetHeading = livePosition.heading as number;
+    } else if (livePosition && currentActiveRoutePoints.length >= 2) {
+      targetHeading = getHeadingFromRoutePoints(
+        livePosition.latitude,
+        livePosition.longitude,
+        currentActiveRoutePoints
+      );
+    } else if (currentActiveRoutePoints.length >= 2) {
+      targetHeading = calculateBearing(
+        currentActiveRoutePoints[0].latitude,
+        currentActiveRoutePoints[0].longitude,
+        currentActiveRoutePoints[1].latitude,
+        currentActiveRoutePoints[1].longitude
+      );
+    }
+
+    setMapHeading(targetHeading);
+    setMapRotationAngle((prev) => getUnwrappedAngle(prev, -targetHeading));
+  }, [navigationMode, livePosition, currentActiveRoutePoints]);
 
   const currentActiveNavTitle = useMemo(() => {
     if (!currentActiveNavItem) return activeRouteName || "Rota 1";
@@ -1826,7 +1906,7 @@ export function GpsTrackingView({
           latitude,
           longitude,
           zoom,
-          Boolean(navigationModeRef.current && isNorthUpRef.current)
+          Boolean(navigationModeRef.current)
         );
         map.flyTo(center, zoom, { duration: 0.65 });
       }
@@ -1854,6 +1934,7 @@ export function GpsTrackingView({
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
         accuracy: position.coords.accuracy,
+        heading: Number.isFinite(position.coords.heading) ? position.coords.heading : null,
         updatedAt: new Date(position.timestamp).toLocaleTimeString("pt-BR", {
           hour: "2-digit",
           minute: "2-digit",
@@ -2786,22 +2867,37 @@ export function GpsTrackingView({
           <div className="gps-map-panel panel">
             <div
               className={`gps-map${hasRouteFocus ? " is-focusing-route-segment" : ""}`}
+              style={navOrientationMode === "course-up" ? { transform: `rotate(${mapRotationAngle}deg)` } : undefined}
               ref={mapContainerRef}
               aria-label="Mapa de Navegação GPS"
             />
           </div>
         </section>
 
-        {/* Botão de Orientação Norte com bússola (acima do botão de fechar) */}
+        {/* Botão de Orientação do Mapa (Google Maps / Direção para Cima vs Norte Fixo) */}
         <button
-          className={`nav-north-fab ${isNorthUp ? "is-active" : "is-off"}`}
+          className={`nav-north-fab ${navOrientationMode === "course-up" ? "is-course-up" : "is-north-up"}`}
           style={navProcedureDetails ? { bottom: "144px" } : undefined}
           type="button"
-          aria-label={isNorthUp ? "Modo Norte para cima ativado" : "Modo Norte para cima desativado"}
-          title={isNorthUp ? "Modo Norte para Cima: Ativado (Clique para desativar)" : "Modo Norte para Cima: Desativado (Clique para ativar)"}
-          onClick={toggleNorthUp}
+          aria-label={
+            navOrientationMode === "course-up"
+              ? "Modo Direção para Cima (Google Maps) ativado - clique para fixar o Norte"
+              : "Modo Norte Fixo ativado - clique para alinhar à direção do caminho"
+          }
+          title={
+            navOrientationMode === "course-up"
+              ? "Modo Google Maps: O caminho percorrido fica apontando sempre para CIMA. Clique para fixar o Norte."
+              : "Modo Norte para Cima. Clique para ativar o modo Google Maps."
+          }
+          onClick={toggleOrientationMode}
         >
-          <Compass size={24} />
+          <Compass
+            size={24}
+            style={{
+              transform: `rotate(${navOrientationMode === "course-up" ? mapRotationAngle : 0}deg)`,
+              transition: "transform 0.4s ease-out"
+            }}
+          />
           <span className="nav-north-indicator-tag">N</span>
         </button>
 

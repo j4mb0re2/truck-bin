@@ -5188,4 +5188,24 @@ button {
   font-size: 11.5px;
 }
 
+/* Navigation Mode Map Container Full Canvas Rotation (Google Maps / Course-Up Mode) */
+.is-navigation-fullscreen .gps-map-panel {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+}
+
+.is-navigation-fullscreen .gps-map-panel .gps-map {
+  width: 180vmax !important;
+  height: 180vmax !important;
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  margin-top: -90vmax !important;
+  margin-left: -90vmax !important;
+  transform-origin: center center;
+  transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
 
