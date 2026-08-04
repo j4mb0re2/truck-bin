@@ -15,6 +15,8 @@ import {
   FileText,
   Globe,
   Layers,
+  LocateFixed,
+  LocateOff,
   MapPinned,
   Navigation,
   Pencil,
@@ -206,6 +208,31 @@ function tooltipText(content: string) {
   const element = document.createElement("span");
   element.textContent = content;
   return element;
+}
+
+function GoogleMapsCompassIcon({ angle = 0 }: { angle?: number }) {
+  return (
+    <svg
+      width="28"
+      height="28"
+      viewBox="0 0 32 32"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      style={{
+        transform: `rotate(${angle}deg)`,
+        transition: "transform 0.4s cubic-bezier(0.25, 1, 0.5, 1)",
+        filter: "drop-shadow(0px 2px 4px rgba(0,0,0,0.5))"
+      }}
+    >
+      <circle cx="16" cy="16" r="14" fill="#0f172a" fillOpacity="0.6" stroke="rgba(255,255,255,0.25)" strokeWidth="1" />
+      {/* Agulha Norte (Vermelha) */}
+      <polygon points="16,4 21,16 16,13 11,16" fill="#ef4444" />
+      {/* Agulha Sul (Branca) */}
+      <polygon points="16,28 21,16 16,19 11,16" fill="#f8fafc" />
+      {/* Centro Ponto */}
+      <circle cx="16" cy="16" r="2.2" fill="#ffffff" />
+    </svg>
+  );
 }
 
 function departureCopy(departureTime: string | undefined) {
@@ -1025,9 +1052,13 @@ export function GpsTrackingView({
 
   const [mapHeading, setMapHeading] = useState<number>(0);
   const [mapRotationAngle, setMapRotationAngle] = useState<number>(0);
+  const mapRotationAngleRef = useRef(mapRotationAngle);
+  useEffect(() => {
+    mapRotationAngleRef.current = mapRotationAngle;
+  }, [mapRotationAngle]);
 
   const getNavigationCenter = useCallback(
-    (lat: number, lng: number, zoom: number, isNav: boolean) => {
+    (lat: number, lng: number, zoom: number, isNav: boolean, rotationDeg: number = 0) => {
       const map = mapRef.current;
       const leaflet = leafletRef.current;
       if (!map || !leaflet) return [lat, lng] as [number, number];
@@ -1037,17 +1068,25 @@ export function GpsTrackingView({
       }
 
       const container = map.getContainer();
-      const height = container.clientHeight;
+      const height = container.clientHeight || (typeof window !== "undefined" ? window.innerHeight : 600);
       if (!height) return leaflet.latLng(lat, lng);
 
       const targetLatLng = leaflet.latLng(lat, lng);
       const targetPoint = map.project(targetLatLng, zoom);
-      // Desloca o centro do mapa para cima em 25% da altura, fazendo o caminhão ficar posicionado a 25% da parte inferior da tela
-      const centerPoint = leaflet.point(targetPoint.x, targetPoint.y - height * 0.25);
+
+      const rad = (rotationDeg * Math.PI) / 180;
+      const offsetDist = height * 0.25;
+
+      const offsetX = offsetDist * Math.sin(rad);
+      const offsetY = offsetDist * Math.cos(rad);
+
+      const centerPoint = leaflet.point(targetPoint.x - offsetX, targetPoint.y - offsetY);
       return map.unproject(centerPoint, zoom);
     },
     []
   );
+
+  const currentActiveRoutePointsRef = useRef<GpxCoordinate[]>([]);
 
   const toggleOrientationMode = useCallback(() => {
     setNavOrientationMode((prev) => {
@@ -1055,9 +1094,35 @@ export function GpsTrackingView({
       try {
         localStorage.setItem("truck-bin:nav-orientation-mode", next);
       } catch {}
+
+      const rot = next === "course-up" ? mapRotationAngleRef.current : 0;
+      if (mapRef.current) {
+        const zoom = Math.max(mapRef.current.getZoom(), 15);
+        if (livePositionRef.current) {
+          const center = getNavigationCenter(
+            livePositionRef.current.latitude,
+            livePositionRef.current.longitude,
+            zoom,
+            true,
+            rot
+          );
+          mapRef.current.flyTo(center, zoom, { duration: 0.4 });
+        } else if (currentActiveRoutePointsRef.current.length > 0) {
+          const firstPt = currentActiveRoutePointsRef.current[0];
+          const center = getNavigationCenter(
+            firstPt.latitude,
+            firstPt.longitude,
+            zoom,
+            true,
+            rot
+          );
+          mapRef.current.flyTo(center, zoom, { duration: 0.4 });
+        }
+      }
+
       return next;
     });
-  }, []);
+  }, [getNavigationCenter]);
 
   const visibleRouteSegments = useMemo(
     () => getRenderedRouteSegments(route.segments, route.segmentTimings, customSegmentTracks, clearedSegmentIndices),
@@ -1266,6 +1331,10 @@ export function GpsTrackingView({
     }
     return currentActiveNavItem.manualRoute.points;
   }, [currentActiveNavItem]);
+
+  useEffect(() => {
+    currentActiveRoutePointsRef.current = currentActiveRoutePoints;
+  }, [currentActiveRoutePoints]);
 
   useEffect(() => {
     if (!navigationMode) return;
@@ -2709,9 +2778,9 @@ export function GpsTrackingView({
     return (
       <main className="gps-page is-navigation-fullscreen">
         <div className="gps-navigation-hud">
-          {/* Linha 1 do Topo: Botão de Camada à esquerda + Seletor de Rota */}
+          {/* Linha 1 do Topo: Botões de Controle + Seletor de Rota */}
           <div className="hud-top-bar-row">
-            {/* Botão de Modo Satélite/Ruas (Apenas Ícone no lado esquerdo) */}
+            {/* Botão de Modo Satélite/Ruas */}
             <button
               className="hud-button hud-icon-only-toggle"
               type="button"
@@ -2720,6 +2789,27 @@ export function GpsTrackingView({
               aria-label={mapLayerType === "satellite" ? "Modo Ruas" : "Modo Satélite"}
             >
               {mapLayerType === "satellite" ? <Layers size={20} /> : <Globe size={20} />}
+            </button>
+
+            {/* Botão Liga/Desliga GPS Explícito no Topo */}
+            <button
+              className={`hud-button hud-gps-toggle-button ${gpsState === "tracking" ? "is-gps-active" : "is-gps-inactive"}`}
+              type="button"
+              onClick={gpsState === "tracking" ? stopTracking : startTracking}
+              title={gpsState === "tracking" ? "GPS LIGADO ao vivo. Clique para desligar" : "GPS DESLIGADO. Clique para ligar"}
+              aria-label={gpsState === "tracking" ? "GPS LIGADO" : "GPS DESLIGADO"}
+            >
+              {gpsState === "tracking" ? (
+                <>
+                  <LocateFixed size={18} className="gps-active-icon-pulse" />
+                  <span className="hud-gps-badge-text">GPS ON</span>
+                </>
+              ) : (
+                <>
+                  <LocateOff size={18} />
+                  <span className="hud-gps-badge-text">GPS OFF</span>
+                </>
+              )}
             </button>
 
             {/* Seletor de Rota Interativo */}
@@ -2874,7 +2964,7 @@ export function GpsTrackingView({
           </div>
         </section>
 
-        {/* Botão de Orientação do Mapa (Google Maps / Direção para Cima vs Norte Fixo) */}
+        {/* Botão de Orientação do Mapa (Estilo Google Maps) */}
         <button
           className={`nav-north-fab ${navOrientationMode === "course-up" ? "is-course-up" : "is-north-up"}`}
           style={navProcedureDetails ? { bottom: "144px" } : undefined}
@@ -2891,14 +2981,7 @@ export function GpsTrackingView({
           }
           onClick={toggleOrientationMode}
         >
-          <Compass
-            size={24}
-            style={{
-              transform: `rotate(${navOrientationMode === "course-up" ? mapRotationAngle : 0}deg)`,
-              transition: "transform 0.4s ease-out"
-            }}
-          />
-          <span className="nav-north-indicator-tag">N</span>
+          <GoogleMapsCompassIcon angle={navOrientationMode === "course-up" ? mapRotationAngle : 0} />
         </button>
 
         {/* Botão redondo minimalista de Encerrar Navegação no canto inferior esquerdo */}
