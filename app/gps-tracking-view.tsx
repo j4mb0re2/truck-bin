@@ -2916,7 +2916,7 @@ export function GpsTrackingView({
             <div
               className={`gps-map${hasRouteFocus ? " is-focusing-route-segment" : ""}`}
               style={{
-                transform: `rotate(${navOrientationMode === "course-up" ? mapRotationAngle : 0}deg) scale(1.3)`
+                transform: `rotate(${navOrientationMode === "course-up" ? mapRotationAngle : 0}deg) scale(0.8)`
               }}
               ref={mapContainerRef}
               aria-label="Mapa de Navegação GPS"
