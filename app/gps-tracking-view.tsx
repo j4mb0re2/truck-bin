@@ -1078,7 +1078,7 @@ export function GpsTrackingView({
       } catch {}
 
       if (mapRef.current) {
-        const zoom = Math.max(mapRef.current.getZoom(), 15);
+        const zoom = mapRef.current.getZoom();
         if (livePositionRef.current) {
           const center = getNavigationCenter(
             livePositionRef.current.latitude,
@@ -2915,7 +2915,9 @@ export function GpsTrackingView({
           <div className="gps-map-panel panel">
             <div
               className={`gps-map${hasRouteFocus ? " is-focusing-route-segment" : ""}`}
-              style={navOrientationMode === "course-up" ? { transform: `rotate(${mapRotationAngle}deg) scale(1.45)` } : undefined}
+              style={{
+                transform: `rotate(${navOrientationMode === "course-up" ? mapRotationAngle : 0}deg) scale(1.3)`
+              }}
               ref={mapContainerRef}
               aria-label="Mapa de Navegação GPS"
             />
